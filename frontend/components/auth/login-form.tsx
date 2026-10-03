@@ -72,21 +72,21 @@ export function LoginForm() {
 
         <section className="relative z-20 -mt-5 flex items-center justify-center rounded-t-[30px] bg-surface px-6 py-10 sm:px-10 lg:absolute lg:inset-y-0 lg:right-0 lg:mt-0 lg:w-[46%] lg:rounded-l-[44px] lg:rounded-tr-none lg:px-12 lg:py-12 xl:px-16">
           <div className="w-full max-w-[560px]">
-            <div className="flex items-center gap-5 sm:gap-6">
+            <div className="flex items-center gap-3 sm:gap-4 xl:gap-6">
               <Image
                 src="/assets/images/logo.png"
                 alt="Dataset Request Desk logo"
                 width={1983}
                 height={793}
                 priority
-                className="h-12 w-[112px] shrink-0 object-contain sm:h-14 sm:w-[132px]"
+                className="h-10 w-[88px] shrink-0 object-contain sm:h-12 sm:w-[104px] xl:h-14 xl:w-[132px]"
               />
               <div className="h-10 w-px bg-border" aria-hidden="true" />
-              <h2 className="text-3xl font-medium tracking-tight sm:text-4xl xl:text-[44px]">
+              <h2 className="min-w-0 text-2xl font-medium tracking-tight sm:text-3xl xl:text-[44px]">
                 Welcome back!
               </h2>
             </div>
-            <p className="mt-6 text-base text-muted-text sm:text-lg">
+            <p className="mt-4 text-sm text-muted-text sm:mt-6 sm:text-lg">
               Sign in to your dataset workspace
             </p>
 

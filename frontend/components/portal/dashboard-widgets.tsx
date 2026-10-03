@@ -77,12 +77,12 @@ export function DailyEpisodesChart({ analytics }: DailyEpisodesChartProps) {
   const robotPalette = ["#2563EB", "#06B6D4", "#7C3AED", "#16A34A", "#D97706"];
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader>
         <CardTitle>Episodes recorded</CardTitle>
         <CardDescription>Daily episode volume, grouped by robot.</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0">
         {chartData.length === 0 ? (
           <EmptyChart>No episode analytics are available yet.</EmptyChart>
         ) : (
@@ -133,12 +133,12 @@ export function RequestStatusChart({
   const total = data.reduce((sum, item) => sum + item.request_count, 0);
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader>
         <CardTitle>Request status</CardTitle>
         <CardDescription>Requests grouped by their current workflow status.</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0">
         {data.length === 0 || total === 0 ? (
           <EmptyChart>No request status data is available yet.</EmptyChart>
         ) : (
