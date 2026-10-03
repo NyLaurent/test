@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ClipboardList,
   Database,
+  FileUp,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -37,6 +38,7 @@ const operationsSections: PortalSection[] = [
   { label: "Overview", href: "", icon: LayoutDashboard },
   { label: "Request queue", href: "/requests", icon: ClipboardList },
   { label: "Episode inventory", href: "/episodes", icon: Database },
+  { label: "Import episodes", href: "/episodes/import", icon: FileUp },
   { label: "Analytics", href: "/analytics", icon: ChartNoAxesCombined },
   { label: "Profile", href: "/profile", icon: UserRound },
 ];
@@ -51,6 +53,7 @@ const routeTitles: Record<string, string> = {
   "/requests": "Requests",
   "/requests/new": "New request",
   "/episodes": "Episode inventory",
+  "/episodes/import": "Import episodes",
   "/analytics": "Analytics",
   "/profile": "Profile",
   "/users": "User management",
