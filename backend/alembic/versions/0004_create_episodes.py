@@ -1,7 +1,7 @@
 """Create the episodes table.
 
 Revision ID: 0004_create_episodes
-Revises: 0003_create_requests_and_status_history
+Revises: 0003_request_history
 Create Date: 2026-09-30 15:50:00.000000
 """
 
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0004_create_episodes"
-down_revision: Union[str, None] = "0003_create_requests_and_status_history"
+down_revision: Union[str, None] = "0003_request_history"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

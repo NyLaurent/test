@@ -21,10 +21,12 @@ services:
       DATABASE_URL: postgresql+psycopg://dataset:dataset@db:5432/dataset_request_desk
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-replace-this-with-a-long-random-secret}
       APP_ENV: ${APP_ENV:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      SEED_USERS_FILE: /app/seed/users.json
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "alembic -c backend/alembic.ini upgrade head && uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000"
+    command: sh -c "alembic -c backend/alembic.ini upgrade head && python -m app.seed_users && uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
 

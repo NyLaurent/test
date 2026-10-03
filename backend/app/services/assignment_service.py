@@ -10,6 +10,15 @@ from app.models.dataset_request import DatasetRequest
 
 class AssignmentService:
     @staticmethod
+    def get_assigned_episodes_for_request(db: Session, request_id: int) -> list[Episode]:
+        assignment_rows = db.execute(
+            select(Assignment.episode_id).where(Assignment.request_id == request_id)
+        ).scalars().all()
+        if not assignment_rows:
+            return []
+        return db.execute(select(Episode).where(Episode.id.in_(assignment_rows))).scalars().all()
+
+    @staticmethod
     def assign_episode(db: Session, request: DatasetRequest, episode: Episode, assigned_by_id: int) -> Assignment:
         if episode.quality not in {EpisodeQuality.good.value, EpisodeQuality.usable.value}:
             raise ValueError("Only good or usable episodes can be assigned")
