@@ -14,7 +14,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Plus,
   X,
   UserRound,
 } from "lucide-react";
@@ -30,7 +29,7 @@ type PortalSection = {
 const clientSections: PortalSection[] = [
   { label: "Overview", href: "/portal", icon: LayoutDashboard },
   { label: "My requests", href: "/portal/requests", icon: ClipboardList },
-  { label: "New request", href: "/portal/requests/new", icon: Plus },
+  { label: "Profile", href: "/portal/profile", icon: UserRound },
 ];
 
 const operationsSections: PortalSection[] = [

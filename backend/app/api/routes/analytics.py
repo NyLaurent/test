@@ -5,9 +5,9 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import require_roles
 from app.db.session import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.analytics import AnalyticsResponse
 from app.services.analytics_service import AnalyticsService
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 def get_analytics(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.operator.value, UserRole.admin.value)),
     db: Session = Depends(get_db),
 ) -> AnalyticsResponse:
     return AnalyticsResponse(

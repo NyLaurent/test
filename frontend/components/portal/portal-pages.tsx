@@ -1,15 +1,22 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
   Archive,
+  Building2,
   CheckCheck,
   Clock3,
+  Eye,
   FilePlus2,
   Files,
+  Pencil,
+  Plus,
+  Trash2,
   Timer,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
@@ -17,13 +24,18 @@ import {
   DailyEpisodesChart,
   MetricCard,
   RequestStatusChart,
+  RequestWorkflowChart,
 } from "@/components/portal/dashboard-widgets";
 import { RequestStatusBadge } from "@/components/portal/request-status-badge";
 import { useToast } from "@/components/toast/toast-provider";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmationModal } from "@/components/ui/confirmation-modal";
+import { Dialog } from "@/components/ui/dialog";
 import {
   assignEpisodeToRequest,
   createRequest,
+  deleteRequest,
+  editRequest,
   getAnalytics,
   getEpisodes,
   getRequests,
@@ -90,41 +102,81 @@ function useWorkspaceData(options: { requests?: boolean; episodes?: boolean; ana
 
 function ClientOverview() {
   const { user } = useAuth();
-  const { requests, isLoading } = useWorkspaceData({ requests: true });
+  const { requests, isLoading, load } = useWorkspaceData({ requests: true });
+  const [createOpen, setCreateOpen] = useState(false);
   const counts = getRequestCounts(requests);
   const activeCount = counts.submitted + counts.in_progress + counts.rejected;
 
   return (
     <div className="space-y-7">
-      <PageHeading
-        eyebrow="Client workspace"
-        title="Overview"
-        description="Create dataset requests and follow them through delivery."
-      />
-      <section aria-label="Request summary" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Total requests" value={isLoading ? "—" : requests.length} detail="All requests you've submitted" icon={Files} tone="blue" />
-        <MetricCard label="In progress" value={isLoading ? "—" : activeCount} detail="Being handled by operations" icon={Clock3} tone="orange" />
-        <MetricCard label="Awaiting review" value={isLoading ? "—" : counts.delivered} detail="Delivered and ready for your review" icon={FilePlus2} tone="purple" />
-        <MetricCard label="Accepted" value={isLoading ? "—" : counts.accepted} detail="Completed requests" icon={CheckCheck} tone="green" />
+      <section className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-brand-blue/15 bg-brand-soft-blue px-3 py-1.5 text-xs font-semibold text-brand-blue">
+            <Building2 aria-hidden="true" size={14} />
+            Dataset Request Desk
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight text-brand-navy sm:text-3xl">Overview</h1>
+          <p className="mt-2 text-sm text-muted-text">
+            Welcome back{user?.full_name ? `, ${user.full_name}` : ""}. Track your requests and deliveries.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-blue-hover"
+        >
+          <Plus aria-hidden="true" size={17} />
+          New request
+        </button>
       </section>
-      <div className="grid items-start gap-5 xl:grid-cols-2">
-        <RequestStatusChart data={statusChartData(counts)} />
-        <Card>
-          <CardHeader>
-            <CardTitle>Get started</CardTitle>
-            <CardDescription>Submit a collection request or check an existing one.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            <Link href="/portal/requests/new" className="rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-blue-hover">
-              Create a request
-            </Link>
-            <Link href="/portal/requests" className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-body-text hover:bg-page-background">
-              View my requests
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
-      <p className="text-xs text-muted-text">Signed in as {user?.full_name || user?.email}</p>
+      {isLoading ? (
+        <ClientOverviewSkeleton />
+      ) : (
+        <>
+          <motion.section
+            aria-label="Request summary"
+            className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: {},
+              visible: { transition: { staggerChildren: 0.07 } },
+            }}
+          >
+            <MetricCard label="Total requests" value={requests.length} detail="All requests you've submitted" icon={Files} tone="blue" />
+            <MetricCard label="In progress" value={activeCount} detail="Being handled by operations" icon={Clock3} tone="orange" />
+            <MetricCard label="Awaiting review" value={counts.delivered} detail="Delivered and ready for your review" icon={FilePlus2} tone="purple" />
+            <MetricCard label="Accepted" value={counts.accepted} detail="Completed requests" icon={CheckCheck} tone="green" />
+          </motion.section>
+          <motion.div
+            className="grid min-w-0 items-start gap-5 xl:grid-cols-2"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, delay: 0.12 }}
+          >
+            <RequestStatusChart data={statusChartData(counts)} />
+            <RequestWorkflowChart data={statusChartData(counts)} />
+          </motion.div>
+        </>
+      )}
+      {createOpen ? (
+        <RequestFormDialog
+          open
+          mode="create"
+          onClose={() => setCreateOpen(false)}
+          onSaved={async () => {
+            setCreateOpen(false);
+            try {
+              await load();
+            } catch {
+              // Creation succeeded; the refreshed view can be loaded on the next page visit.
+            }
+          }}
+        />
+      ) : null}
+      <p className="text-xs text-muted-text">
+        Signed in as <span className="font-medium text-body-text">{user?.full_name || user?.email}</span>
+      </p>
     </div>
   );
 }
@@ -167,6 +219,11 @@ function ClientRequestsPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
   const data = useWorkspaceData({ requests: true });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingRequest, setEditingRequest] = useState<RequestRecord | null>(null);
+  const [viewingRequest, setViewingRequest] = useState<RequestRecord | null>(null);
+  const [deletingRequest, setDeletingRequest] = useState<RequestRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   async function reviewRequest(request: RequestRecord, status: "accepted" | "rejected") {
     if (!token) return;
@@ -195,18 +252,66 @@ function ClientRequestsPage() {
     }
   }
 
+  async function removeRequest() {
+    if (!token || !deletingRequest) return;
+    setIsDeleting(true);
+    try {
+      await deleteRequest(deletingRequest.id, token);
+      showToast({
+        kind: "success",
+        title: "Request deleted",
+        description: `Request #${deletingRequest.id} was removed.`,
+      });
+      setDeletingRequest(null);
+      try {
+        await data.load();
+      } catch {
+        showToast({
+          kind: "info",
+          title: "Request deleted",
+          description: "The list could not refresh. Reload to see the latest requests.",
+        });
+      }
+    } catch (cause) {
+      showToast({
+        kind: "error",
+        title: "Could not delete request",
+        description: cause instanceof Error ? cause.message : "Please try again.",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <PageHeading eyebrow="Client workspace" title="My requests" description="Review status and respond to delivered datasets." />
+      <section className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <PageHeading eyebrow="Dataset Request Desk · Client workspace" title="My requests" description="Review status and respond to delivered datasets." />
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-blue-hover"
+        >
+          <Plus aria-hidden="true" size={17} />
+          New request
+        </button>
+      </section>
       <Card className="overflow-hidden">
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div><CardTitle>Request history</CardTitle><CardDescription>Your submitted dataset requests.</CardDescription></div>
-          <span className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-text">{data.requests.length} total</span>
+          <span className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-text">
+            {data.isLoading ? "Loading…" : `${data.requests.length} total`}
+          </span>
         </CardHeader>
+        {data.isLoading ? (
+          <RequestTableSkeleton />
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="bg-page-background text-xs font-medium uppercase tracking-wide text-muted-text">
-              <tr><th className="px-5 py-3">Task</th><th className="px-5 py-3">Episodes</th><th className="px-5 py-3">Deadline</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Action</th></tr>
+              <tr><th className="px-5 py-3">Task</th><th className="px-5 py-3">Episodes</th><th className="px-5 py-3">Deadline</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
               {data.requests.map((request) => (
@@ -216,23 +321,238 @@ function ClientRequestsPage() {
                   <td className="px-5 py-4 text-body-text">{displayDate(request.deadline)}</td>
                   <td className="px-5 py-4"><RequestStatusBadge status={request.status} /></td>
                   <td className="px-5 py-4 text-right">
-                    {request.status === "delivered" ? (
-                      <div className="inline-flex gap-2">
-                        <button type="button" onClick={() => void reviewRequest(request, "accepted")} className="cursor-pointer rounded-md bg-status-good px-2.5 py-1.5 text-xs font-medium text-white hover:brightness-95">Accept</button>
-                        <button type="button" onClick={() => void reviewRequest(request, "rejected")} className="cursor-pointer rounded-md border border-status-bad/30 px-2.5 py-1.5 text-xs font-medium text-status-bad hover:bg-status-bad/5">Request changes</button>
-                      </div>
-                    ) : <span className="text-xs text-muted-text">—</span>}
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      <button type="button" aria-label={`View request ${request.id}`} onClick={() => setViewingRequest(request)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-body-text hover:bg-page-background">
+                        <Eye aria-hidden="true" size={14} />View
+                      </button>
+                      {request.status === "submitted" ? (
+                        <>
+                          <button type="button" aria-label={`Edit request ${request.id}`} onClick={() => setEditingRequest(request)} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-body-text hover:bg-page-background">
+                            <Pencil aria-hidden="true" size={14} />Edit
+                          </button>
+                          <button type="button" aria-label={`Delete request ${request.id}`} onClick={() => setDeletingRequest(request)} className="inline-flex items-center gap-1 rounded-md border border-status-bad/25 px-2 py-1.5 text-xs font-medium text-status-bad hover:bg-status-bad/5">
+                            <Trash2 aria-hidden="true" size={14} />Delete
+                          </button>
+                        </>
+                      ) : null}
+                      {request.status === "delivered" ? (
+                        <>
+                          <button type="button" onClick={() => void reviewRequest(request, "accepted")} className="rounded-md bg-status-good px-2.5 py-1.5 text-xs font-medium text-white hover:brightness-95">Accept</button>
+                          <button type="button" onClick={() => void reviewRequest(request, "rejected")} className="rounded-md border border-status-bad/30 px-2.5 py-1.5 text-xs font-medium text-status-bad hover:bg-status-bad/5">Request changes</button>
+                        </>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {data.isLoading ? <LoadingMessage>Loading requests…</LoadingMessage> : null}
-          {!data.isLoading && data.requests.length === 0 ? <EmptyMessage icon={<Files size={24} />} title="No requests yet" detail="Your new requests will appear here." /> : null}
+          {data.requests.length === 0 ? <EmptyMessage icon={<Files size={24} />} title="No requests yet" detail="Your new requests will appear here." /> : null}
         </div>
+        )}
       </Card>
+      {createOpen ? (
+        <RequestFormDialog open mode="create" onClose={() => setCreateOpen(false)} onSaved={async () => {
+          setCreateOpen(false);
+          await data.load();
+        }} />
+      ) : null}
+      {editingRequest ? (
+        <RequestFormDialog
+          key={`edit-${editingRequest.id}`}
+          open
+          mode="edit"
+          request={editingRequest}
+          onClose={() => setEditingRequest(null)}
+          onSaved={async () => {
+            setEditingRequest(null);
+            await data.load();
+          }}
+        />
+      ) : null}
+      {viewingRequest ? <RequestDetailsDialog request={viewingRequest} onClose={() => setViewingRequest(null)} /> : null}
+      <ConfirmationModal
+        open={Boolean(deletingRequest)}
+        title="Delete this request?"
+        description={deletingRequest ? `Request #${deletingRequest.id} “${deletingRequest.task_name}” will be permanently deleted. This action cannot be undone.` : ""}
+        confirmLabel="Delete request"
+        onConfirm={() => void removeRequest()}
+        onCancel={() => {
+          if (!isDeleting) setDeletingRequest(null);
+        }}
+        isDestructive
+        isPending={isDeleting}
+      />
     </div>
   );
+}
+
+function ClientOverviewSkeleton() {
+  return (
+    <div className="space-y-5" aria-label="Loading overview" role="status">
+      <span className="sr-only">Loading your request overview…</span>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <motion.div
+            key={index}
+            className="h-32 animate-pulse rounded-xl border border-border bg-surface"
+            initial={{ opacity: 0.4 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.7, repeat: Infinity, repeatType: "reverse", delay: index * 0.08 }}
+          />
+        ))}
+      </div>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <div className="h-[340px] animate-pulse rounded-xl border border-border bg-surface" />
+        <div className="h-[340px] animate-pulse rounded-xl border border-border bg-surface" />
+      </div>
+    </div>
+  );
+}
+
+function RequestTableSkeleton() {
+  return (
+    <div className="space-y-4 p-5" role="status" aria-label="Loading requests">
+      <span className="sr-only">Loading your requests…</span>
+      {Array.from({ length: 5 }, (_, index) => (
+        <motion.div
+          key={index}
+          className="grid grid-cols-[minmax(100px,1.5fr)_0.7fr_0.8fr_0.8fr_1.4fr] items-center gap-4"
+          initial={{ opacity: 0.45 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.65, repeat: Infinity, repeatType: "reverse", delay: index * 0.06 }}
+        >
+          <span className="h-4 rounded bg-border/70" />
+          <span className="h-4 rounded bg-border/70" />
+          <span className="h-4 rounded bg-border/70" />
+          <span className="h-6 w-20 rounded-full bg-border/70" />
+          <span className="h-8 rounded bg-border/70" />
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function RequestFormDialog({
+  open,
+  mode,
+  request,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  mode: "create" | "edit";
+  request?: RequestRecord;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const { token } = useAuth();
+  const { showToast } = useToast();
+  const formId = `request-form-${request?.id ?? "new"}`;
+  const [taskName, setTaskName] = useState(request?.task_name ?? "");
+  const [episodesRequested, setEpisodesRequested] = useState(request?.episodes_requested ?? 1);
+  const [deadline, setDeadline] = useState(request?.deadline ?? "");
+  const [notes, setNotes] = useState(request?.notes ?? "");
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) return;
+    setIsSaving(true);
+    try {
+      const input = {
+        task_name: taskName.trim(),
+        episodes_requested: episodesRequested,
+        deadline: deadline || null,
+        notes: notes.trim() || null,
+      };
+      if (mode === "edit" && request) {
+        await editRequest(request.id, input, token);
+        showToast({ kind: "success", title: "Request updated", description: `Request #${request.id} was updated.` });
+      } else {
+        await createRequest(input, token);
+        showToast({ kind: "success", title: "Request submitted", description: "Your request is now in the operator queue." });
+      }
+      onClose();
+      try {
+        await onSaved();
+      } catch {
+        showToast({
+          kind: "info",
+          title: "Saved successfully",
+          description: "Your request was saved, but the list could not refresh.",
+        });
+      }
+    } catch (cause) {
+      showToast({
+        kind: "error",
+        title: mode === "edit" ? "Could not update request" : "Could not submit request",
+        description: cause instanceof Error ? cause.message : "Please check your details and try again.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      title={mode === "edit" ? "Edit dataset request" : "Create a dataset request"}
+      description={mode === "edit" ? "You can edit a request until an operator begins work." : "Describe the data collection you need from the robotics team."}
+      onClose={onClose}
+      footer={
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} disabled={isSaving} className="min-h-10 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-body-text hover:bg-page-background disabled:opacity-60">Cancel</button>
+          <button type="submit" form={formId} disabled={isSaving} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
+            <FilePlus2 aria-hidden="true" size={16} />
+            {isSaving ? "Saving…" : mode === "edit" ? "Save changes" : "Submit request"}
+          </button>
+        </div>
+      }
+    >
+      <form id={formId} onSubmit={submit} className="space-y-4">
+        <label className="block text-sm font-medium text-body-text">
+          Task name
+          <input required maxLength={255} value={taskName} onChange={(event) => setTaskName(event.target.value)} placeholder="e.g. Pick up the red mug" className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
+        </label>
+        <label className="block text-sm font-medium text-body-text">
+          Episodes requested
+          <input required type="number" min={1} value={episodesRequested} onChange={(event) => setEpisodesRequested(Math.max(1, Number(event.target.value)))} className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
+        </label>
+        <label className="block text-sm font-medium text-body-text">
+          Deadline <span className="font-normal text-muted-text">(optional)</span>
+          <input type="date" value={deadline ?? ""} onChange={(event) => setDeadline(event.target.value)} className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
+        </label>
+        <label className="block text-sm font-medium text-body-text">
+          Notes <span className="font-normal text-muted-text">(optional)</span>
+          <textarea rows={4} maxLength={10_000} value={notes ?? ""} onChange={(event) => setNotes(event.target.value)} placeholder="Add collection or quality requirements…" className="mt-2 w-full resize-y rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
+        </label>
+      </form>
+    </Dialog>
+  );
+}
+
+function RequestDetailsDialog({ request, onClose }: { request: RequestRecord; onClose: () => void }) {
+  return (
+    <Dialog
+      open
+      title={request.task_name}
+      description={`Request #${request.id} details`}
+      onClose={onClose}
+      footer={<div className="flex justify-end"><button type="button" onClick={onClose} className="min-h-10 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover">Close</button></div>}
+    >
+      <dl className="divide-y divide-border">
+        <DetailRow label="Status"><RequestStatusBadge status={request.status} /></DetailRow>
+        <DetailRow label="Episodes requested">{request.episodes_requested}</DetailRow>
+        <DetailRow label="Deadline">{displayDate(request.deadline)}</DetailRow>
+        <DetailRow label="Notes">{request.notes || "No notes provided."}</DetailRow>
+      </dl>
+    </Dialog>
+  );
+}
+
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="grid gap-2 py-3 sm:grid-cols-[10rem_minmax(0,1fr)]"><dt className="text-sm text-muted-text">{label}</dt><dd className="min-w-0 break-words text-sm font-medium text-brand-navy">{children}</dd></div>;
 }
 
 function OperatorRequestsPage() {
@@ -337,61 +657,29 @@ function OperatorRequestsPage() {
 }
 
 function NewRequestPage() {
-  const { token } = useAuth();
-  const { showToast } = useToast();
-  const [taskName, setTaskName] = useState("");
-  const [episodesRequested, setEpisodesRequested] = useState(1);
-  const [deadline, setDeadline] = useState("");
-  const [notes, setNotes] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  async function submitRequest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!token) return;
-    setIsSubmitting(true);
-    try {
-      await createRequest({
-        task_name: taskName.trim(),
-        episodes_requested: episodesRequested,
-        deadline: deadline || undefined,
-        notes: notes.trim() || undefined,
-      }, token);
-      setTaskName("");
-      setEpisodesRequested(1);
-      setDeadline("");
-      setNotes("");
-      showToast({ kind: "success", title: "Request submitted", description: "Your dataset request is now in the operator queue." });
-    } catch (cause) {
-      showToast({ kind: "error", title: "Could not submit request", description: cause instanceof Error ? cause.message : "Please check your details and try again." });
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="space-y-6">
       <PageHeading eyebrow="Client workspace" title="New dataset request" description="Tell the data team what you need collected." />
-      <Card className="max-w-3xl">
-        <CardContent>
-          <form onSubmit={submitRequest} className="space-y-4">
-            <label className="block text-sm font-medium text-body-text">Task name
-              <input required maxLength={200} value={taskName} onChange={(event) => setTaskName(event.target.value)} placeholder="e.g. Pick up the red mug" className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
-            </label>
-            <label className="block text-sm font-medium text-body-text">Episodes requested
-              <input required type="number" min={1} value={episodesRequested} onChange={(event) => setEpisodesRequested(Math.max(1, Number(event.target.value)))} className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
-            </label>
-            <label className="block text-sm font-medium text-body-text">Deadline <span className="font-normal text-muted-text">(optional)</span>
-              <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
-            </label>
-            <label className="block text-sm font-medium text-body-text">Notes <span className="font-normal text-muted-text">(optional)</span>
-              <textarea rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add collection or quality requirements…" className="mt-2 w-full resize-y rounded-lg border border-border bg-surface px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
-            </label>
-            <button type="submit" disabled={isSubmitting} className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
-              <FilePlus2 aria-hidden="true" size={17} />{isSubmitting ? "Submitting…" : "Submit request"}
-            </button>
-          </form>
-        </CardContent>
-      </Card>
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-blue-hover">
+          <Plus aria-hidden="true" size={17} />
+          Open request form
+        </button>
+      ) : null}
+      {open ? (
+        <RequestFormDialog
+          open
+          mode="create"
+          onClose={() => {
+            setOpen(false);
+            router.replace("/portal/requests");
+          }}
+          onSaved={() => router.replace("/portal/requests")}
+        />
+      ) : null}
     </div>
   );
 }

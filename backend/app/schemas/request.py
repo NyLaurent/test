@@ -2,14 +2,38 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class RequestCreate(BaseModel):
-    task_name: str
-    episodes_requested: int
+    model_config = ConfigDict(extra="forbid")
+
+    task_name: str = Field(min_length=1, max_length=255)
+    episodes_requested: int = Field(gt=0)
     deadline: date | None = None
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=10_000)
+
+
+class RequestUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_name: str | None = Field(default=None, min_length=1, max_length=255)
+    episodes_requested: int | None = Field(default=None, gt=0)
+    deadline: date | None = None
+    notes: str | None = Field(default=None, max_length=10_000)
+
+    @field_validator("task_name", "episodes_requested", mode="before")
+    @classmethod
+    def required_update_values_cannot_be_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("This field cannot be null")
+        return value
+
+    @model_validator(mode="after")
+    def require_at_least_one_change(self) -> "RequestUpdate":
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided")
+        return self
 
 
 class RequestStatusUpdate(BaseModel):

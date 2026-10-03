@@ -147,3 +147,39 @@ def test_delivery_requires_enough_assigned_episodes(client, db_session) -> None:
     )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_operator_cannot_reject_a_delivered_request(client, db_session) -> None:
+    client_user = AuthService.create_user(
+        db_session,
+        email="client@example.com",
+        password="StrongPass123!",
+        role=UserRole.client,
+        full_name="Client User",
+    )
+    AuthService.create_user(
+        db_session,
+        email="operator@example.com",
+        password="StrongPass123!",
+        role=UserRole.operator,
+        full_name="Ops User",
+    )
+    request = RequestService.create_request(
+        db_session,
+        client_id=client_user.id,
+        task_name="pick cups",
+        episodes_requested=1,
+        deadline=None,
+        notes=None,
+    )
+    request.status = RequestStatus.delivered.value
+    db_session.commit()
+    token = login_token(client, "operator@example.com", "StrongPass123!")
+
+    response = client.patch(
+        f"/api/requests/{request.id}/status",
+        json={"status": RequestStatus.rejected.value},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN

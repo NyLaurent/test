@@ -188,6 +188,68 @@ export function RequestStatusChart({
   );
 }
 
+export function RequestWorkflowChart({
+  data,
+}: {
+  data: AnalyticsResponse["request_fulfilment"];
+}) {
+  const chartData = data.map((item) => ({
+    ...item,
+    label: item.status.replace("_", " "),
+  }));
+
+  return (
+    <Card className="min-w-0">
+      <CardHeader>
+        <CardTitle>Request pipeline</CardTitle>
+        <CardDescription>How your requests are moving through the workflow.</CardDescription>
+      </CardHeader>
+      <CardContent className="min-w-0">
+        {chartData.length === 0 || chartData.every((item) => item.request_count === 0) ? (
+          <EmptyChart>No request activity to chart yet.</EmptyChart>
+        ) : (
+          <div className="h-[260px] w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 20, left: 4, bottom: 4 }}
+              >
+                <CartesianGrid horizontal={false} stroke="#E2E8F0" strokeDasharray="3 3" />
+                <XAxis
+                  type="number"
+                  allowDecimals={false}
+                  tick={{ fill: "#64748B", fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="label"
+                  width={86}
+                  tick={{ fill: "#334155", fontSize: 11 }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(value: string) => value.replace(/^\w/, (letter) => letter.toUpperCase())}
+                />
+                <Tooltip
+                  formatter={(value) => [value, "Requests"]}
+                  contentStyle={{ border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "none", fontSize: 12 }}
+                />
+                <Bar dataKey="request_count" name="Requests" radius={[0, 5, 5, 0]} barSize={21}>
+                  {chartData.map((item) => (
+                    <Cell key={item.status} fill={statusColors[item.status]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function EmptyChart({ children }: { children: string }) {
   return <div className="flex h-[220px] items-center justify-center text-center text-sm text-muted-text">{children}</div>;
 }

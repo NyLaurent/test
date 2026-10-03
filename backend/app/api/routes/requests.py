@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models.assignment import Assignment
-from app.models.dataset_request import DatasetRequest
+from app.models.dataset_request import DatasetRequest, RequestStatus
 from app.models.episode import Episode
 from app.models.user import User, UserRole
 from app.schemas.assignment import AssignmentCreate, AssignmentRead
 from app.schemas.episode import EpisodeRead
-from app.schemas.request import RequestCreate, RequestRead, RequestStatusUpdate
+from app.schemas.request import RequestCreate, RequestRead, RequestStatusUpdate, RequestUpdate
 from app.services.assignment_service import AssignmentService
 from app.services.request_service import RequestService
 
@@ -60,6 +60,46 @@ def get_request(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
+@router.patch("/{request_id}", response_model=RequestRead)
+def edit_client_request(
+    request_id: int,
+    payload: RequestUpdate,
+    current_user: User = Depends(require_roles(UserRole.client.value)),
+    db: Session = Depends(get_db),
+) -> DatasetRequest:
+    try:
+        request = RequestService.get_request(db, request_id, current_user)
+        return RequestService.update_client_request(
+            db,
+            request=request,
+            changes=payload.model_dump(exclude_unset=True),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_client_request(
+    request_id: int,
+    current_user: User = Depends(require_roles(UserRole.client.value)),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        request = RequestService.get_request(db, request_id, current_user)
+        RequestService.delete_client_request(db, request=request)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.patch("/{request_id}/status", response_model=RequestRead)
 def update_request_status(
     request_id: int,
@@ -95,6 +135,15 @@ def get_request_episodes(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if current_user.role == UserRole.client and request.status not in {
+        RequestStatus.delivered.value,
+        RequestStatus.accepted.value,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Assigned episodes are available after delivery",
+        )
 
     episode_ids = db.scalars(select(Assignment.episode_id).where(Assignment.request_id == request.id)).all()
     if not episode_ids:

@@ -15,7 +15,7 @@ router = APIRouter(prefix="/episodes", tags=["episodes"])
 
 @router.get("", response_model=list[EpisodeRead])
 def list_episodes(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.operator.value, UserRole.admin.value)),
     db: Session = Depends(get_db),
 ) -> list[Episode]:
     return db.query(Episode).order_by(Episode.recorded_at.desc()).all()

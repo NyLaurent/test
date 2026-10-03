@@ -13,6 +13,7 @@ type ConfirmationModalProps = {
   onCancel: () => void;
   children?: ReactNode;
   isDestructive?: boolean;
+  isPending?: boolean;
 };
 
 const focusableSelector = [
@@ -34,9 +35,17 @@ export function ConfirmationModal({
   onCancel,
   children,
   isDestructive = false,
+  isPending = false,
 }: ConfirmationModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef(onCancel);
+  const confirmRef = useRef(onConfirm);
+
+  useEffect(() => {
+    cancelRef.current = onCancel;
+    confirmRef.current = onConfirm;
+  }, [onCancel, onConfirm]);
 
   useEffect(() => {
     if (!open) return;
@@ -51,7 +60,7 @@ export function ConfirmationModal({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        cancelRef.current();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -82,7 +91,7 @@ export function ConfirmationModal({
       document.removeEventListener("keydown", handleKeyDown);
       previouslyFocused?.focus();
     };
-  }, [onCancel, open]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -90,7 +99,7 @@ export function ConfirmationModal({
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center overflow-y-auto bg-brand-navy/45 px-4 py-6 backdrop-blur-sm"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
+        if (event.target === event.currentTarget) cancelRef.current();
       }}
     >
       <div
@@ -120,7 +129,7 @@ export function ConfirmationModal({
           <button
             type="button"
             aria-label="Close dialog"
-            onClick={onCancel}
+            onClick={() => cancelRef.current()}
             className="rounded-lg p-1.5 text-muted-text transition hover:bg-page-background hover:text-brand-navy"
           >
             <X aria-hidden="true" size={18} />
@@ -130,19 +139,20 @@ export function ConfirmationModal({
           <button
             ref={cancelButtonRef}
             type="button"
-            onClick={onCancel}
+            onClick={() => cancelRef.current()}
             className="min-h-10 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-body-text transition hover:bg-page-background"
           >
             {cancelLabel}
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${
+            onClick={() => confirmRef.current()}
+            disabled={isPending}
+            className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
               isDestructive ? "bg-status-bad hover:bg-status-bad/90" : "bg-brand-blue hover:bg-brand-blue-hover"
             }`}
           >
-            {confirmLabel}
+            {isPending ? "Please wait…" : confirmLabel}
           </button>
         </div>
       </div>

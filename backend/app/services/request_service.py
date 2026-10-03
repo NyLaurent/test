@@ -19,8 +19,8 @@ ALLOWED_TRANSITIONS = {
 
 ROLE_TRANSITIONS = {
     UserRole.client: {RequestStatus.accepted, RequestStatus.rejected},
-    UserRole.operator: {RequestStatus.submitted, RequestStatus.in_progress, RequestStatus.delivered, RequestStatus.rejected},
-    UserRole.admin: {RequestStatus.submitted, RequestStatus.in_progress, RequestStatus.delivered, RequestStatus.rejected, RequestStatus.accepted},
+    UserRole.operator: {RequestStatus.submitted, RequestStatus.in_progress, RequestStatus.delivered},
+    UserRole.admin: set(RequestStatus),
 }
 
 
@@ -55,6 +55,15 @@ class RequestService:
             status=RequestStatus.submitted,
         )
         db.add(request)
+        db.flush()
+        db.add(
+            StatusHistory(
+                request_id=request.id,
+                from_status=None,
+                to_status=RequestStatus.submitted.value,
+                changed_by=client_id,
+            )
+        )
         db.commit()
         db.refresh(request)
         return request
@@ -84,6 +93,44 @@ class RequestService:
             select(func.count(Assignment.id)).where(Assignment.request_id == request_id)
         )
         return int(count or 0)
+
+    @staticmethod
+    def update_client_request(
+        db: Session,
+        *,
+        request: DatasetRequest,
+        changes: dict,
+    ) -> DatasetRequest:
+        if _status_value(request.status) != RequestStatus.submitted:
+            raise ValueError("Only submitted requests can be edited")
+
+        if "task_name" in changes:
+            task_name = changes["task_name"].strip()
+            if not task_name:
+                raise ValueError("Task name is required")
+            request.task_name = task_name
+        if "episodes_requested" in changes:
+            episodes_requested = changes["episodes_requested"]
+            if episodes_requested <= 0:
+                raise ValueError("Episodes requested must be greater than zero")
+            request.episodes_requested = episodes_requested
+        if "deadline" in changes:
+            request.deadline = changes["deadline"]
+        if "notes" in changes:
+            request.notes = changes["notes"].strip() if changes["notes"] else None
+
+        db.commit()
+        db.refresh(request)
+        return request
+
+    @staticmethod
+    def delete_client_request(db: Session, *, request: DatasetRequest) -> None:
+        if _status_value(request.status) != RequestStatus.submitted:
+            raise ValueError("Only submitted requests can be deleted")
+        if RequestService.get_assigned_episode_count(db, request.id):
+            raise ValueError("Requests with assigned episodes cannot be deleted")
+        db.delete(request)
+        db.commit()
 
     @staticmethod
     def update_status(

@@ -45,13 +45,33 @@ export async function getRequests(token: string): Promise<RequestRecord[]> {
 export async function createRequest(input: {
   task_name: string;
   episodes_requested: number;
-  deadline?: string;
-  notes?: string;
+  deadline?: string | null;
+  notes?: string | null;
 }, token: string): Promise<RequestRecord> {
   return apiFetch<RequestRecord>("/api/requests", {
     method: "POST",
     body: JSON.stringify(input),
   }, token);
+}
+
+export async function editRequest(
+  requestId: number,
+  input: {
+    task_name?: string;
+    episodes_requested?: number;
+    deadline?: string | null;
+    notes?: string | null;
+  },
+  token: string,
+): Promise<RequestRecord> {
+  return apiFetch<RequestRecord>(`/api/requests/${requestId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  }, token);
+}
+
+export async function deleteRequest(requestId: number, token: string): Promise<void> {
+  await apiFetch<void>(`/api/requests/${requestId}`, { method: "DELETE" }, token);
 }
 
 export async function updateRequestStatus(
