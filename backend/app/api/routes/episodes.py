@@ -31,11 +31,24 @@ from app.services.episode_import_service import EpisodeImportService
 router = APIRouter(prefix="/episodes", tags=["episodes"])
 
 
-def _seed_csv_path() -> Path:
-    configured_path = os.environ.get("SEED_EPISODES_FILE")
+def _seed_asset_path(filename: str, environment_variable: str) -> Path:
+    configured_path = os.environ.get(environment_variable)
     if configured_path:
         return Path(configured_path)
-    return Path(__file__).resolve().parents[4] / "seed" / "episodes.csv"
+
+    # In a source checkout the route file is under backend/app, but after
+    # `pip install .` it lives in site-packages. Prefer the service/repo root
+    # (Render and the Docker image both run from the repository/app root),
+    # then fall back to the source-tree-relative location used in development.
+    candidates = (
+        Path.cwd() / "seed" / filename,
+        Path(__file__).resolve().parents[4] / "seed" / filename,
+    )
+    return next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
+
+
+def _seed_csv_path() -> Path:
+    return _seed_asset_path("episodes.csv", "SEED_EPISODES_FILE")
 
 
 def _read_seed_csv() -> str:
@@ -162,7 +175,7 @@ def generate_episodes(
     current_user: User = Depends(require_roles(UserRole.operator.value, UserRole.admin.value)),
     db: Session = Depends(get_db),
 ) -> EpisodeImportSummary:
-    script_path = Path(__file__).resolve().parents[4] / "seed" / "generate_episodes.py"
+    script_path = _seed_asset_path("generate_episodes.py", "SEED_EPISODE_GENERATOR_FILE")
     try:
         generated_csv = subprocess.run(
             [sys.executable, str(script_path), str(payload.count)],

@@ -28,6 +28,8 @@ SQLite does not preserve timezone metadata when it reloads a timezone-aware `Dat
 
 During frontend session debugging, login and refresh succeeded while protected API calls returned 401. Inspecting the outgoing request revealed that the shared API helper was sending a placeholder instead of the bearer token. I corrected the header and confirmed the helper now builds `Authorization: Bearer <access token>`.
 
+After deployment, the operator inventory could not preview or import the bundled CSV, even though the seed file was in the repository. The backend had built and installed as a Python package, so `__file__` resolved inside Render's virtual environment rather than beside the repository's `seed/` folder. I updated both the CSV and generator lookup to prefer the service working directory and retain explicit environment-variable overrides. This code fix needs to be deployed before confirming the inventory flow on the hosted app.
+
 The test container's wall clock also jumped between requests during one suite run, making otherwise valid 15-minute tokens appear expired in multi-request authorization tests. I confirmed this from the signed `iat`/`exp` claims and stabilized only the authorization-test helper's time claims; the dedicated auth tests still exercise real login, expiration, and refresh behavior.
 
 ## Security
