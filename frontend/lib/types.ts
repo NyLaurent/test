@@ -27,6 +27,16 @@ export interface RequestRecord {
   status: RequestStatus;
 }
 
+export interface StatusHistoryEntry {
+  id: number;
+  request_id: number;
+  from_status: RequestStatus | null;
+  to_status: RequestStatus;
+  note: string | null;
+  changed_by: number;
+  changed_at: string;
+}
+
 export interface Episode {
   id: number;
   episode_id: string;

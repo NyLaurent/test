@@ -6,6 +6,7 @@ import type {
   EpisodePage,
   LoginPayload,
   RequestRecord,
+  StatusHistoryEntry,
   User,
   UserRole,
 } from "./types";
@@ -269,11 +270,16 @@ export async function updateRequestStatus(
   requestId: number,
   status: string,
   token: string,
+  note?: string,
 ): Promise<RequestRecord> {
   return apiFetch<RequestRecord>(`/api/requests/${requestId}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, ...(note ? { note } : {}) }),
   }, token);
+}
+
+export async function getRequestHistory(requestId: number, token: string): Promise<StatusHistoryEntry[]> {
+  return apiFetch<StatusHistoryEntry[]>(`/api/requests/${requestId}/history`, { method: "GET" }, token);
 }
 
 export async function getEpisodes(
@@ -332,6 +338,21 @@ export async function assignEpisodeToRequest(
     {
       method: "POST",
       body: JSON.stringify({ episode_id: episodeId }),
+    },
+    token,
+  );
+}
+
+export async function assignEpisodesToRequest(
+  requestId: number,
+  episodeIds: number[],
+  token: string,
+): Promise<Array<{ id: number; request_id: number; episode_id: number; assigned_by: number }>> {
+  return apiFetch<Array<{ id: number; request_id: number; episode_id: number; assigned_by: number }>>(
+    `/api/requests/${requestId}/episodes/bulk`,
+    {
+      method: "POST",
+      body: JSON.stringify({ episode_ids: episodeIds }),
     },
     token,
   );

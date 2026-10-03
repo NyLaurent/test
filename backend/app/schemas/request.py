@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -38,6 +38,13 @@ class RequestUpdate(BaseModel):
 
 class RequestStatusUpdate(BaseModel):
     status: str
+    note: str | None = Field(default=None, max_length=10_000)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value else None
+        return normalized or None
 
 
 class RequestRead(BaseModel):
@@ -59,4 +66,6 @@ class StatusHistoryRead(BaseModel):
     request_id: int
     from_status: str | None
     to_status: str
+    note: str | None
     changed_by: int
+    changed_at: datetime

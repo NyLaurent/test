@@ -14,6 +14,7 @@ type ConfirmationModalProps = {
   children?: ReactNode;
   isDestructive?: boolean;
   isPending?: boolean;
+  confirmDisabled?: boolean;
 };
 
 const focusableSelector = [
@@ -36,6 +37,7 @@ export function ConfirmationModal({
   children,
   isDestructive = false,
   isPending = false,
+  confirmDisabled = false,
 }: ConfirmationModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -147,7 +149,7 @@ export function ConfirmationModal({
           <button
             type="button"
             onClick={() => confirmRef.current()}
-            disabled={isPending}
+            disabled={isPending || confirmDisabled}
             className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
               isDestructive ? "bg-status-bad hover:bg-status-bad/90" : "bg-brand-blue hover:bg-brand-blue-hover"
             }`}

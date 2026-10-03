@@ -40,11 +40,11 @@ These accounts and Compose database credentials are only for local development. 
 
 Every API operation except login and `/health` requires a bearer token. The API enforces role and ownership checks independently of the UI:
 
-- Clients can create requests and access only their own requests. They can edit or delete requests only while `submitted`, and can accept/reject their own `delivered` requests. Assigned episodes become visible after delivery.
+- Clients can create requests and access only their own requests. They can edit or delete requests only while `submitted`, accept their own `delivered` requests, or reject them with written feedback. Delivered episode details and review feedback remain visible from the request details view.
 - Operators can view the shared request queue, move requests through operator-owned steps, assign eligible episodes, import episode CSVs, and view analytics.
 - Admins can do operator work and manage user roles, activation, and account creation.
 
-The workflow permits only `submitted → in_progress → delivered → accepted/rejected`; rejected work can return to `in_progress`. Each transition records its actor and time. Assignment is database-constrained to one request per episode, only good/usable episodes are eligible, and delivery is blocked until the requested count has been assigned.
+The workflow permits only `submitted → in_progress → delivered → accepted/rejected`; rejected work can return to `in_progress`. Each transition records its actor, time, and optional note; a note is required when a client requests changes. Operators can select and assign multiple eligible episodes in one action. Assignment is database-constrained to one request per episode, only good/usable episodes are eligible, and delivery is blocked until the requested count has been assigned.
 
 Episode imports are available to operators and admins from **Episode inventory**. CSV headers are normalized, invalid/duplicate rows are skipped with line-specific reasons, and `episode_id` uniqueness makes repeated imports idempotent. The UI shows the imported inventory in a server-paginated table with task and quality filters, and lists every skipped CSV line with its reason. The API accepts raw `text/csv` at `POST /api/episodes/import`; filtered pages are available from `GET /api/episodes/page`.
 

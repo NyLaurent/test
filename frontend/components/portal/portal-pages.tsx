@@ -35,7 +35,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { Dialog } from "@/components/ui/dialog";
 import {
-  assignEpisodeToRequest,
+  assignEpisodesToRequest,
   createRequest,
   createAdminUser,
   deleteRequest,
@@ -45,6 +45,7 @@ import {
   getEpisodePage,
   getEpisodes,
   getRequestEpisodes,
+  getRequestHistory,
   getRequests,
   importEpisodes,
   updateAdminUser,
@@ -56,6 +57,7 @@ import type {
   EpisodeImportSummary,
   RequestRecord,
   RequestStatus,
+  StatusHistoryEntry,
   User,
   UserRole,
 } from "@/lib/types";
@@ -240,17 +242,26 @@ function ClientRequestsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<RequestRecord | null>(null);
   const [viewingRequest, setViewingRequest] = useState<RequestRecord | null>(null);
+  const [reviewAction, setReviewAction] = useState<{
+    request: RequestRecord;
+    status: "accepted" | "rejected";
+  } | null>(null);
+  const [rejectionNote, setRejectionNote] = useState("");
+  const [isReviewing, setIsReviewing] = useState(false);
   const [deletingRequest, setDeletingRequest] = useState<RequestRecord | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  async function reviewRequest(request: RequestRecord, status: "accepted" | "rejected") {
+  async function reviewRequest(request: RequestRecord, status: "accepted" | "rejected", note?: string) {
     if (!token) return;
+    setIsReviewing(true);
     try {
-      await updateRequestStatus(request.id, status, token);
+      await updateRequestStatus(request.id, status, token, note);
+      setReviewAction(null);
+      setRejectionNote("");
       showToast({
         kind: "success",
         title: status === "accepted" ? "Delivery accepted" : "Changes requested",
-        description: status === "accepted" ? "This dataset delivery has been accepted." : "The request has been returned to the operator.",
+        description: status === "accepted" ? "This dataset delivery has been accepted." : "Your note was sent to the operations team.",
       });
       try {
         await data.load();
@@ -267,6 +278,8 @@ function ClientRequestsPage() {
         title: "Could not update request",
         description: cause instanceof Error ? cause.message : "Please try again.",
       });
+    } finally {
+      setIsReviewing(false);
     }
   }
 
@@ -355,8 +368,8 @@ function ClientRequestsPage() {
                       ) : null}
                       {request.status === "delivered" ? (
                         <>
-                          <button type="button" onClick={() => void reviewRequest(request, "accepted")} className="rounded-md bg-status-good px-2.5 py-1.5 text-xs font-medium text-white hover:brightness-95">Accept</button>
-                          <button type="button" onClick={() => void reviewRequest(request, "rejected")} className="rounded-md border border-status-bad/30 px-2.5 py-1.5 text-xs font-medium text-status-bad hover:bg-status-bad/5">Request changes</button>
+                          <button type="button" onClick={() => setReviewAction({ request, status: "accepted" })} className="rounded-md bg-status-good px-2.5 py-1.5 text-xs font-medium text-white hover:brightness-95">Accept</button>
+                          <button type="button" onClick={() => { setRejectionNote(""); setReviewAction({ request, status: "rejected" }); }} className="rounded-md border border-status-bad/30 px-2.5 py-1.5 text-xs font-medium text-status-bad hover:bg-status-bad/5">Request changes</button>
                         </>
                       ) : null}
                     </div>
@@ -388,7 +401,46 @@ function ClientRequestsPage() {
           }}
         />
       ) : null}
-      {viewingRequest ? <RequestDetailsDialog request={viewingRequest} onClose={() => setViewingRequest(null)} /> : null}
+      {viewingRequest ? <ClientRequestDetailsDialog key={viewingRequest.id} request={viewingRequest} token={token} onClose={() => setViewingRequest(null)} /> : null}
+      <ConfirmationModal
+        open={Boolean(reviewAction)}
+        title={reviewAction?.status === "accepted" ? "Accept this delivery?" : "Request changes to this delivery?"}
+        description={reviewAction?.status === "accepted"
+          ? `Are you sure you want to accept the delivery for “${reviewAction.request.task_name}”?`
+          : `Are you sure you want to reject the delivery for “${reviewAction?.request.task_name ?? "this request"}”? Your note will be shared with the operations team.`}
+        confirmLabel={reviewAction?.status === "accepted" ? "Accept delivery" : "Send feedback"}
+        onConfirm={() => {
+          if (!reviewAction) return;
+          void reviewRequest(
+            reviewAction.request,
+            reviewAction.status,
+            reviewAction.status === "rejected" ? rejectionNote.trim() : undefined,
+          );
+        }}
+        onCancel={() => {
+          if (!isReviewing) setReviewAction(null);
+        }}
+        isDestructive={reviewAction?.status === "rejected"}
+        isPending={isReviewing}
+        confirmDisabled={reviewAction?.status === "rejected" && !rejectionNote.trim()}
+      >
+        {reviewAction?.status === "rejected" ? (
+          <label className="mt-4 block text-sm font-medium text-body-text">
+            What needs to change, and why?
+            <textarea
+              required
+              autoFocus
+              maxLength={10_000}
+              rows={4}
+              value={rejectionNote}
+              onChange={(event) => setRejectionNote(event.target.value)}
+              placeholder="Describe the issue with this delivery so the team can address it."
+              className="mt-2 w-full resize-y rounded-lg border border-border bg-surface px-3 py-2.5 text-sm font-normal outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10"
+            />
+            <span className="mt-1 block text-xs font-normal text-muted-text">This feedback will be saved with the request history.</span>
+          </label>
+        ) : null}
+      </ConfirmationModal>
       <ConfirmationModal
         open={Boolean(deletingRequest)}
         title="Delete this request?"
@@ -550,12 +602,57 @@ function RequestFormDialog({
   );
 }
 
-function RequestDetailsDialog({ request, onClose }: { request: RequestRecord; onClose: () => void }) {
+function ClientRequestDetailsDialog({
+  request,
+  token,
+  onClose,
+}: {
+  request: RequestRecord;
+  token: string | null;
+  onClose: () => void;
+}) {
+  const { showToast } = useToast();
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [history, setHistory] = useState<StatusHistoryEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const canViewEpisodes = ["delivered", "accepted", "rejected"].includes(request.status);
+
+  useEffect(() => {
+    let isActive = true;
+    if (!token) return () => { isActive = false; };
+
+    const episodesPromise = canViewEpisodes
+      ? getRequestEpisodes(request.id, token)
+      : Promise.resolve([] as Episode[]);
+    void Promise.all([episodesPromise, getRequestHistory(request.id, token)])
+      .then(([assigned, statusHistory]) => {
+        if (!isActive) return;
+        setEpisodes(assigned);
+        setHistory(statusHistory);
+      })
+      .catch((cause: unknown) => {
+        if (isActive) {
+          showToast({
+            kind: "error",
+            title: "Could not load request details",
+            description: cause instanceof Error ? cause.message : "Please try again.",
+          });
+        }
+      })
+      .finally(() => {
+        if (isActive) setIsLoading(false);
+      });
+
+    return () => { isActive = false; };
+  }, [canViewEpisodes, request.id, showToast, token]);
+
+  const rejectionNotes = history.filter((entry) => entry.to_status === "rejected" && entry.note);
+
   return (
     <Dialog
       open
       title={request.task_name}
-      description={`Request #${request.id} details`}
+      description={`Request #${request.id} · delivery details`}
       onClose={onClose}
       footer={<div className="flex justify-end"><button type="button" onClick={onClose} className="min-h-10 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover">Close</button></div>}
     >
@@ -565,6 +662,51 @@ function RequestDetailsDialog({ request, onClose }: { request: RequestRecord; on
         <DetailRow label="Deadline">{displayDate(request.deadline)}</DetailRow>
         <DetailRow label="Notes">{request.notes || "No notes provided."}</DetailRow>
       </dl>
+      {rejectionNotes.length ? (
+        <section className="mt-5 rounded-xl border border-status-bad/20 bg-status-bad/5 p-4">
+          <h3 className="text-sm font-semibold text-brand-navy">Feedback on the delivery</h3>
+          <ul className="mt-3 space-y-3">
+            {rejectionNotes.map((entry) => (
+              <li key={entry.id} className="text-sm leading-6 text-body-text">
+                <p>{entry.note}</p>
+                <p className="mt-1 text-xs text-muted-text">{formatDateTime(entry.changed_at)}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <section className="mt-6">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-brand-navy">Delivered episodes</h3>
+          <span className="text-xs text-muted-text">{canViewEpisodes ? episodes.length : "Available after delivery"}</span>
+        </div>
+        {isLoading ? <p className="mt-3 text-sm text-muted-text">Loading delivery details…</p> : null}
+        {!isLoading && !canViewEpisodes ? (
+          <p className="mt-3 rounded-lg bg-page-background px-3 py-3 text-sm text-muted-text">Episode details will appear here once the delivery is ready.</p>
+        ) : null}
+        {!isLoading && canViewEpisodes && episodes.length === 0 ? (
+          <p className="mt-3 rounded-lg bg-page-background px-3 py-3 text-sm text-muted-text">No episode details are available for this delivery.</p>
+        ) : null}
+        {!isLoading && episodes.length ? (
+          <ul className="mt-3 max-h-80 space-y-3 overflow-y-auto pr-1">
+            {episodes.map((episode) => (
+              <li key={episode.id} className="rounded-xl border border-border bg-surface p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-brand-navy">{episode.episode_id}</p>
+                  <QualityBadge quality={episode.quality} />
+                </div>
+                <dl className="mt-3 grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2">
+                  <DetailRow label="Task">{episode.task_name}</DetailRow>
+                  <DetailRow label="Robot">{episode.robot_id}</DetailRow>
+                  <DetailRow label="Recorded">{formatDateTime(episode.recorded_at)}</DetailRow>
+                  <DetailRow label="Duration">{formatEpisodeDuration(episode.duration_seconds)}</DetailRow>
+                  <DetailRow label="Operator">{episode.operator_name}</DetailRow>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
     </Dialog>
   );
 }
@@ -577,11 +719,13 @@ function OperatorRequestsPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
   const data = useWorkspaceData({ requests: true, episodes: true, availableEpisodesOnly: true });
-  const [selectionByRequest, setSelectionByRequest] = useState<Record<number, string>>({});
   const [assignmentTaskFilter, setAssignmentTaskFilter] = useState("");
   const [assignmentQualityFilter, setAssignmentQualityFilter] = useState<Episode["quality"] | "">("");
+  const [assigningRequest, setAssigningRequest] = useState<RequestRecord | null>(null);
+  const [isAssigning, setIsAssigning] = useState(false);
   const [viewingRequest, setViewingRequest] = useState<RequestRecord | null>(null);
   const [assignedEpisodes, setAssignedEpisodes] = useState<Episode[]>([]);
+  const [requestHistory, setRequestHistory] = useState<StatusHistoryEntry[]>([]);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const eligibleEpisodes = data.episodes.filter((episode) => episode.quality === "good" || episode.quality === "usable");
   const visibleEligibleEpisodes = eligibleEpisodes.filter((episode) => {
@@ -594,12 +738,18 @@ function OperatorRequestsPage() {
     setViewingRequest(request);
     setIsLoadingDetails(true);
     setAssignedEpisodes([]);
+    setRequestHistory([]);
     if (!token) {
       setIsLoadingDetails(false);
       return;
     }
     try {
-      setAssignedEpisodes(await getRequestEpisodes(request.id, token));
+      const [episodes, history] = await Promise.all([
+        getRequestEpisodes(request.id, token),
+        getRequestHistory(request.id, token),
+      ]);
+      setAssignedEpisodes(episodes);
+      setRequestHistory(history);
     } catch (cause) {
       showToast({ kind: "error", title: "Could not load request details", description: cause instanceof Error ? cause.message : "Please try again." });
     } finally {
@@ -626,17 +776,21 @@ function OperatorRequestsPage() {
     }
   }
 
-  async function assignEpisode(requestId: number) {
-    const episodeId = Number(selectionByRequest[requestId]);
+  async function assignEpisodes(requestId: number, episodeIds: number[]) {
     if (!token) return;
-    if (!episodeId) {
+    if (!episodeIds.length) {
       showToast({ kind: "error", title: "Choose an episode", description: "Select a good or usable episode before assigning." });
       return;
     }
+    setIsAssigning(true);
     try {
-      await assignEpisodeToRequest(requestId, episodeId, token);
-      setSelectionByRequest((current) => ({ ...current, [requestId]: "" }));
-      showToast({ kind: "success", title: "Episode assigned", description: `Episode #${episodeId} was assigned to request #${requestId}.` });
+      const assignments = await assignEpisodesToRequest(requestId, episodeIds, token);
+      setAssigningRequest(null);
+      showToast({
+        kind: "success",
+        title: "Episodes assigned",
+        description: `${assignments.length} ${assignments.length === 1 ? "episode was" : "episodes were"} assigned to request #${requestId}.`,
+      });
       try {
         await data.load();
       } catch {
@@ -647,7 +801,9 @@ function OperatorRequestsPage() {
         });
       }
     } catch (cause) {
-      showToast({ kind: "error", title: "Could not assign episode", description: cause instanceof Error ? cause.message : "Please try again." });
+      showToast({ kind: "error", title: "Could not assign episodes", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsAssigning(false);
     }
   }
 
@@ -673,7 +829,7 @@ function OperatorRequestsPage() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] text-left text-sm">
             <thead className="bg-page-background text-xs font-medium uppercase tracking-wide text-muted-text">
-              <tr><th className="px-5 py-3">Dataset request</th><th className="px-5 py-3">Client</th><th className="px-5 py-3">Episodes</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Assign episode</th><th className="px-5 py-3 text-right">Actions</th></tr>
+              <tr><th className="px-5 py-3">Dataset request</th><th className="px-5 py-3">Client</th><th className="px-5 py-3">Episodes</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Assign episodes</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
               {data.requests.map((request) => {
@@ -687,13 +843,14 @@ function OperatorRequestsPage() {
                     <td className="px-5 py-4"><RequestStatusBadge status={request.status} /></td>
                     <td className="px-5 py-4">
                       {canAssign ? (
-                        <div className="flex min-w-[290px] items-center gap-2">
-                          <select aria-label={`Episode for request ${request.id}`} value={selectionByRequest[request.id] ?? ""} onChange={(event) => setSelectionByRequest((current) => ({ ...current, [request.id]: event.target.value }))} className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-body-text outline-none focus:border-brand-blue">
-                            <option value="">Select an episode</option>
-                            {visibleEligibleEpisodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.episode_id} · {episode.task_name} · {episode.quality}</option>)}
-                          </select>
-                          <button type="button" onClick={() => void assignEpisode(request.id)} className="cursor-pointer rounded-md border border-brand-blue px-2.5 py-2 text-xs font-medium text-brand-blue hover:bg-brand-soft-blue">Assign</button>
-                        </div>
+                        <button
+                          type="button"
+                          disabled={visibleEligibleEpisodes.length === 0}
+                          onClick={() => setAssigningRequest(request)}
+                          className="cursor-pointer whitespace-nowrap rounded-md border border-brand-blue px-3 py-2 text-xs font-medium text-brand-blue hover:bg-brand-soft-blue disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Choose episodes
+                        </button>
                       ) : <span className="text-xs text-muted-text">Available in progress</span>}
                     </td>
                     <td className="px-5 py-4 text-right">
@@ -726,6 +883,18 @@ function OperatorRequestsPage() {
             <DetailRow label="Episodes requested">{viewingRequest.episodes_requested}</DetailRow>
             <DetailRow label="Deadline">{displayDate(viewingRequest.deadline)}</DetailRow>
             <DetailRow label="Notes">{viewingRequest.notes || "No notes provided."}</DetailRow>
+            {requestHistory.filter((entry) => entry.note).length ? (
+              <DetailRow label="Client feedback">
+                <ul className="space-y-2">
+                  {requestHistory.filter((entry) => entry.note).map((entry) => (
+                    <li key={entry.id} className="rounded-lg border border-status-bad/20 bg-status-bad/5 p-3">
+                      <p>{entry.note}</p>
+                      <p className="mt-1 text-xs font-normal text-muted-text">{formatDateTime(entry.changed_at)}</p>
+                    </li>
+                  ))}
+                </ul>
+              </DetailRow>
+            ) : null}
             <DetailRow label="Assigned episodes">
               {isLoadingDetails ? "Loading assigned episodes…" : assignedEpisodes.length
                 ? <ul className="space-y-1">{assignedEpisodes.map((episode) => <li key={episode.id}>{episode.episode_id} · {episode.task_name} · {episode.quality}</li>)}</ul>
@@ -734,7 +903,116 @@ function OperatorRequestsPage() {
           </dl>
         </Dialog>
       ) : null}
+      {assigningRequest ? (
+        <EpisodeAssignmentDialog
+          key={assigningRequest.id}
+          request={assigningRequest}
+          episodes={visibleEligibleEpisodes}
+          isSaving={isAssigning}
+          onAssign={(episodeIds) => assignEpisodes(assigningRequest.id, episodeIds)}
+          onClose={() => {
+            if (!isAssigning) setAssigningRequest(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function EpisodeAssignmentDialog({
+  request,
+  episodes,
+  isSaving,
+  onAssign,
+  onClose,
+}: {
+  request: RequestRecord;
+  episodes: Episode[];
+  isSaving: boolean;
+  onAssign: (episodeIds: number[]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const allVisibleSelected = episodes.length > 0 && episodes.every((episode) => selectedIds.has(episode.id));
+
+  function toggleEpisode(episodeId: number) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(episodeId)) next.delete(episodeId);
+      else next.add(episodeId);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) episodes.forEach((episode) => next.delete(episode.id));
+      else episodes.forEach((episode) => next.add(episode.id));
+      return next;
+    });
+  }
+
+  return (
+    <Dialog
+      open
+      title="Assign episodes"
+      description={`Choose the episodes to include in “${request.task_name}” (request #${request.id}).`}
+      onClose={onClose}
+      footer={(
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-text" aria-live="polite">{selectedIds.size} selected</p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={onClose} disabled={isSaving} className="min-h-10 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-body-text hover:bg-page-background disabled:opacity-60">Cancel</button>
+            <button
+              type="button"
+              onClick={() => void onAssign(Array.from(selectedIds))}
+              disabled={isSaving || selectedIds.size === 0}
+              className="min-h-10 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Assigning…" : `Assign ${selectedIds.size} ${selectedIds.size === 1 ? "episode" : "episodes"}`}
+            </button>
+          </div>
+        </div>
+      )}
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-text">Only unassigned good or usable episodes are shown.</p>
+          <button type="button" onClick={toggleAllVisible} disabled={!episodes.length || isSaving} className="text-sm font-medium text-brand-blue hover:underline disabled:text-muted-text">
+            {allVisibleSelected ? "Clear visible selection" : "Select all visible"}
+          </button>
+        </div>
+        {episodes.length ? (
+          <ul className="max-h-[min(55dvh,28rem)] space-y-2 overflow-y-auto pr-1">
+            {episodes.map((episode) => (
+              <li key={episode.id}>
+                <label className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition ${selectedIds.has(episode.id) ? "border-brand-blue bg-brand-soft-blue/50" : "border-border hover:bg-page-background"}`}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(episode.id)}
+                    onChange={() => toggleEpisode(episode.id)}
+                    disabled={isSaving}
+                    className="mt-1 h-4 w-4 shrink-0 accent-brand-blue"
+                    aria-label={`Select episode ${episode.episode_id}`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-brand-navy">{episode.episode_id}</span>
+                      <QualityBadge quality={episode.quality} />
+                    </span>
+                    <span className="mt-1 block truncate text-sm text-body-text">{episode.task_name} · {episode.robot_id}</span>
+                    <span className="mt-1 block text-xs text-muted-text">Recorded {formatDateTime(episode.recorded_at)} · {formatEpisodeDuration(episode.duration_seconds)} · {episode.operator_name}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-lg bg-page-background px-4 py-6 text-center text-sm text-muted-text">No episodes match the current filters.</p>
+        )}
+      </div>
+    </Dialog>
   );
 }
 
@@ -1320,6 +1598,17 @@ function statusChartData(counts: ReturnType<typeof getRequestCounts>): Analytics
 
 function displayDate(value?: string | null) {
   return value ? new Date(`${value}T00:00:00`).toLocaleDateString() : "—";
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
+}
+
+function formatEpisodeDuration(seconds: number) {
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds ? `${minutes} min ${remainingSeconds} sec` : `${minutes} min`;
 }
 
 function formatDuration(seconds: number | null) {

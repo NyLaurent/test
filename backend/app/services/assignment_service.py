@@ -21,27 +21,42 @@ class AssignmentService:
 
     @staticmethod
     def assign_episode(db: Session, request: DatasetRequest, episode: Episode, assigned_by_id: int) -> Assignment:
+        return AssignmentService.assign_episodes(db, request, [episode], assigned_by_id)[0]
+
+    @staticmethod
+    def assign_episodes(
+        db: Session,
+        request: DatasetRequest,
+        episodes: list[Episode],
+        assigned_by_id: int,
+    ) -> list[Assignment]:
         if request.status not in {"in_progress", "rejected"}:
             raise ValueError("Episodes can only be assigned to requests in progress or in rework")
-        if episode.quality not in {EpisodeQuality.good.value, EpisodeQuality.usable.value}:
+        if not episodes:
+            raise ValueError("Select at least one episode")
+
+        episode_ids = [episode.id for episode in episodes]
+        if len(episode_ids) != len(set(episode_ids)):
+            raise ValueError("Episode ids must be unique")
+        if any(episode.quality not in {EpisodeQuality.good.value, EpisodeQuality.usable.value} for episode in episodes):
             raise ValueError("Only good or usable episodes can be assigned")
 
-        existing = db.scalar(
-            select(Assignment).where(Assignment.episode_id == episode.id)
-        )
-        if existing is not None:
+        existing_ids = set(db.scalars(
+            select(Assignment.episode_id).where(Assignment.episode_id.in_(episode_ids))
+        ).all())
+        if existing_ids:
             raise ValueError("Episode is already assigned to a request")
 
-        assignment = Assignment(
-            request_id=request.id,
-            episode_id=episode.id,
-            assigned_by=assigned_by_id,
-        )
-        db.add(assignment)
+        assignments = [
+            Assignment(request_id=request.id, episode_id=episode.id, assigned_by=assigned_by_id)
+            for episode in episodes
+        ]
+        db.add_all(assignments)
         try:
             db.commit()
         except IntegrityError as exc:
             db.rollback()
             raise ValueError("Episode is already assigned to a request") from exc
-        db.refresh(assignment)
-        return assignment
+        for assignment in assignments:
+            db.refresh(assignment)
+        return assignments

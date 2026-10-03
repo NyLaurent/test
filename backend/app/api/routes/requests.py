@@ -9,10 +9,17 @@ from app.db.session import get_db
 from app.models.assignment import Assignment
 from app.models.dataset_request import DatasetRequest, RequestStatus
 from app.models.episode import Episode
+from app.models.status_history import StatusHistory
 from app.models.user import User, UserRole
-from app.schemas.assignment import AssignmentCreate, AssignmentRead
+from app.schemas.assignment import AssignmentBulkCreate, AssignmentCreate, AssignmentRead
 from app.schemas.episode import EpisodeRead
-from app.schemas.request import RequestCreate, RequestRead, RequestStatusUpdate, RequestUpdate
+from app.schemas.request import (
+    RequestCreate,
+    RequestRead,
+    RequestStatusUpdate,
+    RequestUpdate,
+    StatusHistoryRead,
+)
 from app.services.assignment_service import AssignmentService
 from app.services.request_service import RequestService
 
@@ -120,6 +127,7 @@ def update_request_status(
             request=request,
             new_status=payload.status,
             changed_by=current_user,
+            note=payload.note,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -127,6 +135,26 @@ def update_request_status(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{request_id}/history", response_model=list[StatusHistoryRead])
+def get_request_history(
+    request_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[StatusHistory]:
+    try:
+        request = RequestService.get_request(db, request_id, current_user)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    return db.scalars(
+        select(StatusHistory)
+        .where(StatusHistory.request_id == request.id)
+        .order_by(StatusHistory.changed_at, StatusHistory.id)
+    ).all()
 
 
 @router.get("/{request_id}/episodes", response_model=list[EpisodeRead])
@@ -145,6 +173,7 @@ def get_request_episodes(
     if current_user.role == UserRole.client and request.status not in {
         RequestStatus.delivered.value,
         RequestStatus.accepted.value,
+        RequestStatus.rejected.value,
     }:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -155,6 +184,33 @@ def get_request_episodes(
     if not episode_ids:
         return []
     return db.scalars(select(Episode).where(Episode.id.in_(episode_ids))).all()
+
+
+@router.post(
+    "/{request_id}/episodes/bulk",
+    response_model=list[AssignmentRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def assign_episodes_to_request(
+    request_id: int,
+    payload: AssignmentBulkCreate,
+    current_user: User = Depends(require_roles(UserRole.operator.value, UserRole.admin.value)),
+    db: Session = Depends(get_db),
+) -> list[Assignment]:
+    try:
+        request = RequestService.get_request(db, request_id, current_user)
+        episodes = db.scalars(select(Episode).where(Episode.id.in_(payload.episode_ids))).all()
+        if len(episodes) != len(payload.episode_ids):
+            raise ValueError("One or more selected episodes were not found")
+        episodes_by_id = {episode.id: episode for episode in episodes}
+        ordered_episodes = [episodes_by_id[episode_id] for episode_id in payload.episode_ids]
+        return AssignmentService.assign_episodes(db, request, ordered_episodes, current_user.id)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/{request_id}/episodes", response_model=AssignmentRead, status_code=status.HTTP_201_CREATED)

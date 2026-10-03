@@ -20,7 +20,7 @@ ALLOWED_TRANSITIONS = {
 ROLE_TRANSITIONS = {
     UserRole.client: {RequestStatus.accepted, RequestStatus.rejected},
     UserRole.operator: {RequestStatus.submitted, RequestStatus.in_progress, RequestStatus.delivered},
-    UserRole.admin: set(RequestStatus),
+    UserRole.admin: {RequestStatus.submitted, RequestStatus.in_progress, RequestStatus.delivered},
 }
 
 
@@ -139,6 +139,7 @@ class RequestService:
         request: DatasetRequest,
         new_status: str | RequestStatus,
         changed_by: User,
+        note: str | None = None,
     ) -> DatasetRequest:
         target = _status_value(new_status)
         current = _status_value(request.status)
@@ -148,6 +149,10 @@ class RequestService:
 
         if changed_by.role not in ROLE_TRANSITIONS or target not in ROLE_TRANSITIONS[changed_by.role]:
             raise PermissionError("You do not have permission to perform this status change")
+
+        normalized_note = note.strip() if note else None
+        if target == RequestStatus.rejected and not normalized_note:
+            raise ValueError("A note is required when requesting changes to a delivery")
 
         if target == RequestStatus.delivered:
             assigned_count = RequestService.get_assigned_episode_count(db, request.id)
@@ -159,6 +164,7 @@ class RequestService:
             request_id=request.id,
             from_status=current.value,
             to_status=target.value,
+            note=normalized_note,
             changed_by=changed_by.id,
         )
         db.add(history)
