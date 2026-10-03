@@ -1,7 +1,10 @@
 "use client";
 
+import Image from "next/image";
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 
 export function LoginForm() {
@@ -9,6 +12,7 @@ export function LoginForm() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -28,86 +32,128 @@ export function LoginForm() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] text-slate-900">
-      <div className="grid min-h-screen lg:grid-cols-[1.1fr_0.9fr]">
-        <section className="relative hidden overflow-hidden bg-[#10251f] p-12 text-white lg:flex lg:flex-col lg:justify-between">
-          <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full border border-white/10" />
-          <div className="absolute -right-8 -top-8 h-64 w-64 rounded-full border border-white/10" />
-          <div className="relative flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-400 font-bold text-emerald-950">D</span>
-            <span className="font-semibold tracking-wide">FIELDNOTES <span className="font-normal text-emerald-300">/ DATA OPS</span></span>
-          </div>
-          <div className="relative max-w-xl pb-12">
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-300">Dataset Request Desk</p>
-            <h1 className="mt-5 text-5xl font-semibold leading-tight tracking-tight">
-              From robot recordings to ready-to-use data.
+    <main className="min-h-screen bg-surface text-brand-navy lg:h-screen lg:overflow-hidden">
+      <div className="relative min-h-screen overflow-hidden bg-brand-navy lg:h-full">
+        <div className="absolute inset-x-0 top-0 h-[42vh] overflow-hidden bg-brand-navy lg:inset-y-0 lg:right-auto lg:h-auto lg:w-[58%]">
+          <Image
+            src="/assets/images/login/login2.jpg"
+            alt=""
+            fill
+            priority
+            sizes="(max-width: 1024px) 100vw, 58vw"
+            className="object-cover object-center"
+          />
+          <div className="absolute inset-0 bg-brand-navy/25" />
+          <div className="absolute inset-0 bg-gradient-to-b from-brand-navy/35 via-brand-navy/20 to-brand-navy/75" />
+        </div>
+
+        <section className="relative z-10 flex min-h-[42vh] flex-col justify-between px-6 py-6 text-white sm:px-10 sm:py-8 lg:absolute lg:inset-y-0 lg:left-0 lg:min-h-0 lg:w-[58%] lg:px-12 lg:py-10">
+          <Link
+            href="/"
+            className="inline-flex w-fit items-center gap-2 rounded-full bg-surface px-5 py-3 text-sm font-medium text-brand-navy shadow-sm transition hover:bg-brand-soft-blue"
+          >
+            <ArrowLeft aria-hidden="true" size={18} strokeWidth={2.25} />
+            Back home
+          </Link>
+
+          <div className="mt-auto max-w-2xl pb-8 lg:pb-10">
+            <h1 className="max-w-2xl text-5xl font-normal leading-[1.08] tracking-tight text-white sm:text-6xl lg:text-7xl">
+              Robotics data.
+              <br />
+              Limitless insight.
             </h1>
-            <p className="mt-6 max-w-lg text-lg leading-8 text-slate-300">
-              A shared workspace for requesting, curating, and delivering high-quality robotics datasets.
-            </p>
-            <div className="mt-12 grid grid-cols-3 gap-5 border-t border-white/15 pt-6 text-sm text-slate-300">
-              <p><strong className="block text-2xl text-white">01</strong>Request</p>
-              <p><strong className="block text-2xl text-white">02</strong>Curate</p>
-              <p><strong className="block text-2xl text-white">03</strong>Deliver</p>
-            </div>
           </div>
-          <p className="relative text-xs text-slate-400">INTERNAL DATA OPERATIONS PLATFORM</p>
         </section>
 
-        <section className="flex items-center justify-center px-5 py-12 sm:px-10">
-          <div className="w-full max-w-md">
-            <div className="mb-10 flex items-center gap-3 lg:hidden">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-800 font-bold text-white">D</span>
-              <span className="font-semibold tracking-wide">FIELDNOTES <span className="font-normal text-emerald-700">/ DATA OPS</span></span>
+        <section className="relative z-20 -mt-5 flex items-center justify-center rounded-t-[30px] bg-surface px-6 py-10 sm:px-10 lg:absolute lg:inset-y-0 lg:right-0 lg:mt-0 lg:w-[46%] lg:rounded-l-[44px] lg:rounded-tr-none lg:px-12 lg:py-12 xl:px-16">
+          <div className="w-full max-w-[560px]">
+            <div className="flex items-center gap-5 sm:gap-6">
+              <Image
+                src="/assets/images/logo.png"
+                alt="Dataset Request Desk logo"
+                width={1983}
+                height={793}
+                priority
+                className="h-12 w-[112px] shrink-0 object-contain sm:h-14 sm:w-[132px]"
+              />
+              <div className="h-10 w-px bg-border" aria-hidden="true" />
+              <h2 className="text-3xl font-medium tracking-tight sm:text-4xl xl:text-[44px]">
+                Welcome back!
+              </h2>
             </div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-800">Welcome back</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight">Sign in to your workspace</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-500">
-              Use your organization account to manage dataset requests.
+            <p className="mt-6 text-base text-muted-text sm:text-lg">
+              Sign in to your dataset workspace
             </p>
 
             {error ? (
-              <div role="alert" className="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              <div
+                role="alert"
+                className="mt-7 rounded-2xl border border-status-bad/25 bg-status-bad/5 px-5 py-3 text-sm text-status-bad"
+              >
                 {error}
               </div>
             ) : null}
 
-            <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+            <form onSubmit={handleSubmit} className="mt-8 space-y-6 sm:mt-10">
               <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">Email address</span>
-                <input
-                  autoComplete="username"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@company.com"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 outline-none transition placeholder:text-slate-400 focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/15"
-                />
+                <span className="mb-3 block text-sm font-medium text-brand-navy sm:text-base">
+                  Email address
+                </span>
+                <span className="flex h-[58px] items-center gap-4 rounded-full border border-border bg-surface px-5 transition focus-within:border-brand-blue focus-within:ring-4 focus-within:ring-brand-blue/10">
+                  <Mail aria-hidden="true" size={21} className="shrink-0 text-muted-text" strokeWidth={1.6} />
+                  <input
+                    autoComplete="username"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="Enter your email"
+                    className="h-full min-w-0 flex-1 bg-transparent text-sm text-body-text outline-none placeholder:text-muted-text/75 sm:text-base"
+                  />
+                </span>
               </label>
+
               <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">Password</span>
-                <input
-                  autoComplete="current-password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 outline-none transition placeholder:text-slate-400 focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/15"
-                />
+                <span className="mb-3 block text-sm font-medium text-brand-navy sm:text-base">
+                  Password
+                </span>
+                <span className="flex h-[58px] items-center gap-4 rounded-full border border-border bg-surface px-5 transition focus-within:border-brand-blue focus-within:ring-4 focus-within:ring-brand-blue/10">
+                  <LockKeyhole aria-hidden="true" size={21} className="shrink-0 text-muted-text" strokeWidth={1.6} />
+                  <input
+                    autoComplete="current-password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    className="h-full min-w-0 flex-1 bg-transparent text-sm text-body-text outline-none placeholder:text-muted-text/75 sm:text-base"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="shrink-0 text-muted-text transition hover:text-brand-navy"
+                  >
+                    {showPassword ? (
+                      <EyeOff aria-hidden="true" size={20} strokeWidth={1.8} />
+                    ) : (
+                      <Eye aria-hidden="true" size={20} strokeWidth={1.8} />
+                    )}
+                  </button>
+                </span>
               </label>
+
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full rounded-lg bg-emerald-800 px-4 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-2 h-[60px] w-full rounded-full bg-brand-blue px-5 text-base font-semibold text-white transition hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSubmitting ? "Signing in…" : "Sign in"}
               </button>
             </form>
 
-            <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">
-              Access is managed by your platform administrator. Contact your team if you need an account.
+            <p className="mt-8 border-t border-border pt-6 text-center text-sm leading-6 text-muted-text sm:mt-10">
+              Access is limited to authorized users. Contact your platform administrator if you need an account.
             </p>
           </div>
         </section>

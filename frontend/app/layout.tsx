@@ -1,16 +1,27 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const powerGrotesk = localFont({
+  src: [
+    { path: "../public/assets/font/PowerGrotesk-UltraLight.ttf", weight: "200", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-UltraLightItalic.ttf", weight: "200", style: "italic" },
+    { path: "../public/assets/font/PowerGrotesk-Light.ttf", weight: "300", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-LightItalic.ttf", weight: "300", style: "italic" },
+    { path: "../public/assets/font/PowerGrotesk-Regular.ttf", weight: "400", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-Italic.ttf", weight: "400", style: "italic" },
+    { path: "../public/assets/font/PowerGrotesk-Medium.ttf", weight: "500", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-MediumItalic.ttf", weight: "500", style: "italic" },
+    { path: "../public/assets/font/PowerGrotesk-Heavy.ttf", weight: "700", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-HeavyItalic.ttf", weight: "700", style: "italic" },
+    { path: "../public/assets/font/PowerGrotesk-UltraBold.ttf", weight: "800", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-UltraBoldItalic.ttf", weight: "800", style: "italic" },
+    { path: "../public/assets/font/PowerGrotesk-Black.ttf", weight: "900", style: "normal" },
+    { path: "../public/assets/font/PowerGrotesk-BlackItalic.ttf", weight: "900", style: "italic" },
+  ],
+  variable: "--font-power-grotesk",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -20,10 +31,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${powerGrotesk.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <AuthProvider>{children}</AuthProvider>
       </body>

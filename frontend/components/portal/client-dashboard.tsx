@@ -86,7 +86,7 @@ export function ClientDashboard() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-800">Client portal</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-blue">Client portal</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your dataset requests</h1>
           <p className="mt-2 text-slate-500">Create a collection request and review datasets when they are delivered.</p>
         </div>
@@ -111,23 +111,23 @@ export function ClientDashboard() {
           <div className="mt-5 space-y-4">
             <label className="block text-sm font-medium text-slate-700">
               Task name
-              <input required maxLength={200} value={taskName} onChange={(event) => setTaskName(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10" placeholder="e.g. Pick up the red mug" />
+              <input required maxLength={200} value={taskName} onChange={(event) => setTaskName(event.target.value)} className="mt-2 w-full rounded-lg border border-border px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" placeholder="e.g. Pick up the red mug" />
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block text-sm font-medium text-slate-700">
                 Episodes requested
-                <input required type="number" min={1} value={episodesRequested} onChange={(event) => setEpisodesRequested(Math.max(1, Number(event.target.value)))} className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10" />
+                <input required type="number" min={1} value={episodesRequested} onChange={(event) => setEpisodesRequested(Math.max(1, Number(event.target.value)))} className="mt-2 w-full rounded-lg border border-border px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
               </label>
               <label className="block text-sm font-medium text-slate-700">
                 Deadline
-                <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10" />
+                <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} className="mt-2 w-full rounded-lg border border-border px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" />
               </label>
             </div>
             <label className="block text-sm font-medium text-slate-700">
               Notes <span className="font-normal text-slate-400">(optional)</span>
-              <textarea rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} className="mt-2 w-full resize-y rounded-lg border border-slate-300 px-3 py-2.5 font-normal outline-none focus:border-emerald-700 focus:ring-2 focus:ring-emerald-700/10" placeholder="Add data quality requirements or context…" />
+              <textarea rows={4} value={notes} onChange={(event) => setNotes(event.target.value)} className="mt-2 w-full resize-y rounded-lg border border-border px-3 py-2.5 font-normal outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10" placeholder="Add data quality requirements or context…" />
             </label>
-            <button disabled={isSubmitting} className="w-full rounded-lg bg-emerald-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60">
+            <button disabled={isSubmitting} className="w-full rounded-lg bg-brand-blue px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-blue-hover disabled:opacity-60">
               {isSubmitting ? "Submitting…" : "Submit request"}
             </button>
           </div>
@@ -156,8 +156,8 @@ export function ClientDashboard() {
                 {request.notes ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{request.notes}</p> : null}
                 {request.status === "delivered" ? (
                   <div className="mt-4 flex gap-2 border-t border-slate-100 pt-3">
-                    <button onClick={() => void handleReview(request, "accepted")} className="rounded-lg bg-emerald-800 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Accept delivery</button>
-                    <button onClick={() => void handleReview(request, "rejected")} className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-50">Request changes</button>
+                    <button onClick={() => void handleReview(request, "accepted")} className="rounded-lg bg-status-good px-3 py-2 text-sm font-semibold text-white hover:brightness-95">Accept delivery</button>
+                    <button onClick={() => void handleReview(request, "rejected")} className="rounded-lg border border-status-bad px-3 py-2 text-sm font-semibold text-status-bad hover:bg-status-bad/5">Request changes</button>
                   </div>
                 ) : null}
               </article>

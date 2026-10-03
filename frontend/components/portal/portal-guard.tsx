@@ -14,7 +14,7 @@ export function PortalGuard({ children }: { children: ReactNode }) {
 
   if (isLoading || !user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f4f6f8] text-sm text-slate-500">
+      <main className="flex min-h-screen items-center justify-center bg-page-background text-sm text-muted-text">
         Loading your workspace…
       </main>
     );

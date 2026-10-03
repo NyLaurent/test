@@ -84,7 +84,7 @@ export function OperatorDashboard() {
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-800">{user?.role} portal</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-blue">{user?.role} portal</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight">Operations overview</h1>
           <p className="mt-2 text-slate-500">Coordinate request delivery, assign quality-approved episodes, and monitor activity.</p>
         </div>
@@ -124,7 +124,7 @@ export function OperatorDashboard() {
                     {request.notes ? <p className="mt-2 text-sm text-slate-600">{request.notes}</p> : null}
                   </div>
                   {nextStatus ? (
-                    <button onClick={() => void handleStatusChange(request)} className="rounded-lg bg-emerald-800 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+                    <button onClick={() => void handleStatusChange(request)} className="rounded-lg bg-brand-blue px-3 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover">
                       Move to {nextStatus.replace("_", " ")}
                     </button>
                   ) : null}
@@ -144,7 +144,7 @@ export function OperatorDashboard() {
                         </option>
                       ))}
                     </select>
-                    <button onClick={() => void handleAssignment(request.id)} className="rounded-lg border border-emerald-800 px-4 py-2.5 text-sm font-semibold text-emerald-900 hover:bg-emerald-50">
+                    <button onClick={() => void handleAssignment(request.id)} className="rounded-lg border border-brand-blue px-4 py-2.5 text-sm font-semibold text-brand-blue hover:bg-brand-soft-blue">
                       Assign episode
                     </button>
                   </div>
@@ -179,7 +179,7 @@ export function OperatorDashboard() {
           <div className="mt-5 space-y-3">
             {analytics?.top_good_tasks.map((task, index) => (
               <div key={task.task_name} className="flex items-center gap-3 border-b border-slate-100 pb-3 last:border-0">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-sm font-semibold text-emerald-900">{index + 1}</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-soft-blue text-sm font-semibold text-brand-blue">{index + 1}</span>
                 <span className="flex-1 text-sm font-medium">{task.task_name}</span>
                 <span className="text-sm font-semibold tabular-nums">{task.good_episode_count}</span>
               </div>
