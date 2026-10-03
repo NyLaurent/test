@@ -94,12 +94,23 @@ def test_operator_can_view_all_requests_and_filter_episode_inventory(client, db_
         headers=headers,
     )
     available_response = client.get("/api/episodes?available_only=true", headers=headers)
+    paged_response = client.get("/api/episodes/page?limit=1&offset=0", headers=headers)
+    filtered_page = client.get(
+        "/api/episodes/page?task_name=stack&quality=bad&limit=1",
+        headers=headers,
+    )
     assert requests_response.status_code == status.HTTP_200_OK
     assert {item["id"] for item in requests_response.json()} == {request_a.id, request_b.id}
     assert filtered_response.status_code == status.HTTP_200_OK
     assert [item["episode_id"] for item in filtered_response.json()] == ["EP-OP-1"]
     assert available_response.status_code == status.HTTP_200_OK
     assert available_response.json() == []
+    assert paged_response.status_code == status.HTTP_200_OK
+    assert paged_response.json()["total"] == 2
+    assert paged_response.json()["limit"] == 1
+    assert [item["episode_id"] for item in paged_response.json()["items"]] == ["EP-OP-2"]
+    assert filtered_page.json()["total"] == 1
+    assert [item["episode_id"] for item in filtered_page.json()["items"]] == ["EP-OP-2"]
 
 
 def test_operator_endpoint_authorization_for_import_inventory_and_analytics(client, db_session) -> None:
@@ -119,7 +130,7 @@ def test_operator_endpoint_authorization_for_import_inventory_and_analytics(clie
     operator_headers = login_headers(client, "operator@example.com")
     csv_text = "episode_id,robot_id,task_name,recorded_at,duration_seconds,operator_name,quality\n"
 
-    for path in ("/api/episodes", "/api/analytics"):
+    for path in ("/api/episodes", "/api/episodes/page", "/api/analytics"):
         assert client.get(path, headers=client_headers).status_code == status.HTTP_403_FORBIDDEN
         assert client.get(path, headers=operator_headers).status_code == status.HTTP_200_OK
     assert client.post(

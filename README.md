@@ -46,11 +46,11 @@ Every API operation except login and `/health` requires a bearer token. The API 
 
 The workflow permits only `submitted → in_progress → delivered → accepted/rejected`; rejected work can return to `in_progress`. Each transition records its actor and time. Assignment is database-constrained to one request per episode, only good/usable episodes are eligible, and delivery is blocked until the requested count has been assigned.
 
-Episode imports are available to operators and admins from **Episode inventory**. CSV headers are normalized, invalid/duplicate rows are skipped with line-specific reasons, and `episode_id` uniqueness makes repeated imports idempotent. The API accepts raw `text/csv` at `POST /api/episodes/import`.
+Episode imports are available to operators and admins from **Episode inventory**. CSV headers are normalized, invalid/duplicate rows are skipped with line-specific reasons, and `episode_id` uniqueness makes repeated imports idempotent. The UI shows the imported inventory in a server-paginated table with task and quality filters, and lists every skipped CSV line with its reason. The API accepts raw `text/csv` at `POST /api/episodes/import`; filtered pages are available from `GET /api/episodes/page`.
 
 ## Authentication and security
 
-Passwords are stored as bcrypt hashes. JWTs are signed, expire after one hour, and require `sub`, `iat`, and `exp` claims. Configure a non-placeholder `JWT_SECRET_KEY` of at least 32 characters outside development and use HTTPS in production. The frontend clears invalid/expired tokens and asks the user to sign in again. Login rate limiting should be configured at the deployment edge before public exposure.
+Passwords are stored as bcrypt hashes. Signed access tokens expire after 15 minutes; a random refresh token is stored only as a hash in PostgreSQL and rotates on each refresh, with a 14-day inactivity lifetime. The frontend transparently refreshes expired access tokens and retries the original request; refresh failures caused by an unavailable API preserve the local session, while expired, revoked, or invalid refresh tokens require a new sign-in. Existing browser sessions created before refresh-token support have no refresh token and require one sign-in after upgrading. Configure a non-placeholder `JWT_SECRET_KEY` of at least 32 characters outside development and use HTTPS in production. Login rate limiting should be configured at the deployment edge before public exposure.
 
 ## Analytics and scale
 

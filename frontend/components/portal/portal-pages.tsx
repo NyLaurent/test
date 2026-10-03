@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
@@ -42,6 +42,7 @@ import {
   editRequest,
   getAnalytics,
   getAdminUsers,
+  getEpisodePage,
   getEpisodes,
   getRequestEpisodes,
   getRequests,
@@ -49,7 +50,15 @@ import {
   updateAdminUser,
   updateRequestStatus,
 } from "@/lib/api";
-import type { AnalyticsResponse, Episode, RequestRecord, RequestStatus, User, UserRole } from "@/lib/types";
+import type {
+  AnalyticsResponse,
+  Episode,
+  EpisodeImportSummary,
+  RequestRecord,
+  RequestStatus,
+  User,
+  UserRole,
+} from "@/lib/types";
 
 export type PortalPageSection = "overview" | "requests" | "new-request" | "episodes" | "analytics" | "profile" | "users";
 
@@ -763,32 +772,62 @@ function EpisodesPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [totalEpisodes, setTotalEpisodes] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState("");
   const [qualityFilter, setQualityFilter] = useState<Episode["quality"] | "">("");
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
   const [isImporting, setIsImporting] = useState(false);
-  const [importSummary, setImportSummary] = useState<Awaited<ReturnType<typeof importEpisodes>> | null>(null);
+  const [importSummary, setImportSummary] = useState<EpisodeImportSummary | null>(null);
+  const requestSequence = useRef(0);
 
   const loadEpisodes = useCallback(async () => {
     if (!token) return;
+    const requestId = ++requestSequence.current;
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const results = await getEpisodes(token, {
+      const result = await getEpisodePage(token, {
         taskName: taskFilter.trim() || undefined,
         quality: qualityFilter || undefined,
+        limit: pageSize,
+        offset: pageIndex * pageSize,
       });
-      setEpisodes(results);
+      if (requestId !== requestSequence.current) return;
+      setEpisodes(result.items);
+      setTotalEpisodes(result.total);
     } catch (cause) {
-      showToast({ kind: "error", title: "Could not load episodes", description: cause instanceof Error ? cause.message : "Please try again." });
+      if (requestId !== requestSequence.current) return;
+      const message = cause instanceof Error ? cause.message : "Please try again.";
+      setLoadError(message);
+      showToast({ kind: "error", title: "Could not load episodes", description: message });
     } finally {
-      setIsLoading(false);
+      if (requestId === requestSequence.current) setIsLoading(false);
     }
-  }, [qualityFilter, showToast, taskFilter, token]);
+  }, [pageIndex, pageSize, qualityFilter, showToast, taskFilter, token]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadEpisodes(), 250);
     return () => window.clearTimeout(timeout);
   }, [loadEpisodes]);
+
+  function updateTaskFilter(value: string) {
+    setTaskFilter(value);
+    setPageIndex(0);
+  }
+
+  function updateQualityFilter(value: Episode["quality"] | "") {
+    setQualityFilter(value);
+    setPageIndex(0);
+  }
+
+  function updatePageSize(value: number) {
+    setPageSize(value);
+    setPageIndex(0);
+  }
 
   async function handleImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -799,22 +838,47 @@ function EpisodesPage() {
       return;
     }
     setIsImporting(true);
+    setImportError(null);
     setImportSummary(null);
+    setIsLoading(true);
     try {
       const result = await importEpisodes(await file.text(), token);
       setImportSummary(result);
+      setTaskFilter("");
+      setQualityFilter("");
+      setPageIndex(0);
       showToast({
         kind: "success",
         title: "Episode import complete",
         description: `${result.imported_count} imported; ${result.skipped_count} skipped.`,
       });
-      await loadEpisodes();
+      try {
+        const refreshedPage = await getEpisodePage(token, { limit: pageSize, offset: 0 });
+        setEpisodes(refreshedPage.items);
+        setTotalEpisodes(refreshedPage.total);
+        setLoadError(null);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Please try refreshing the inventory.";
+        setLoadError(message);
+        showToast({
+          kind: "info",
+          title: "Import saved; inventory could not refresh",
+          description: message,
+        });
+      }
     } catch (cause) {
-      showToast({ kind: "error", title: "Episode import failed", description: cause instanceof Error ? cause.message : "Please try again." });
+      const message = cause instanceof Error ? cause.message : "Please try again.";
+      setImportError(message);
+      showToast({ kind: "error", title: "Episode import failed", description: message });
     } finally {
       setIsImporting(false);
+      setIsLoading(false);
     }
   }
+
+  const pageCount = Math.max(1, Math.ceil(totalEpisodes / pageSize));
+  const firstResult = totalEpisodes === 0 ? 0 : pageIndex * pageSize + 1;
+  const lastResult = Math.min((pageIndex + 1) * pageSize, totalEpisodes);
 
   return (
     <div className="space-y-6">
@@ -827,37 +891,127 @@ function EpisodesPage() {
               <input name="episode-csv" type="file" accept=".csv,text/csv" className="mt-2 block w-full cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-sm text-body-text file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-brand-soft-blue file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-blue" />
             </label>
             <button type="submit" disabled={isImporting} className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
-              <FileUp aria-hidden="true" size={16} />{isImporting ? "Importing…" : "Import CSV"}
+              {isImporting ? (
+                <motion.span aria-hidden="true" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
+                  <Activity size={16} />
+                </motion.span>
+              ) : <FileUp aria-hidden="true" size={16} />}
+              {isImporting ? "Importing episodes…" : "Import CSV"}
             </button>
           </form>
+          {importError ? (
+            <motion.div
+              role="alert"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 rounded-lg border border-status-bad/20 bg-status-bad/5 px-4 py-3 text-sm text-status-bad"
+            >
+              Import failed: {importError}
+            </motion.div>
+          ) : null}
           {importSummary ? (
-            <div aria-live="polite" className="mt-4 rounded-lg border border-border bg-page-background p-4 text-sm">
-              <p className="font-medium text-brand-navy">{importSummary.total_rows} rows · {importSummary.imported_count} imported · {importSummary.skipped_count} skipped</p>
-              {importSummary.reasons.length ? <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-xs text-muted-text">{importSummary.reasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}</ul> : null}
-            </div>
+            <motion.section
+              aria-live="polite"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.24 }}
+              className="mt-4 rounded-xl border border-border bg-page-background p-4 sm:p-5"
+            >
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-brand-navy">Import results</p>
+                  <p className="mt-1 text-xs text-muted-text">Every CSV row is accounted for below.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 sm:min-w-[390px]">
+                  <ImportCount label="Rows read" value={importSummary.total_rows} tone="neutral" />
+                  <ImportCount label="Imported" value={importSummary.imported_count} tone="good" />
+                  <ImportCount label="Skipped" value={importSummary.skipped_count} tone={importSummary.skipped_count ? "warning" : "good"} />
+                </div>
+              </div>
+              {importSummary.skipped_rows.length ? (
+                <div className="mt-4 overflow-hidden rounded-lg border border-border bg-surface">
+                  <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <p className="text-sm font-medium text-brand-navy">Skipped rows and reasons</p>
+                    <span className="rounded-full bg-status-warning/10 px-2.5 py-1 text-xs font-medium text-status-warning">{importSummary.skipped_rows.length}</span>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    <ul className="divide-y divide-border">
+                      {importSummary.skipped_rows.map((issue) => (
+                        <li key={`${issue.line_number}-${issue.reason}`} className="grid gap-1 px-4 py-3 text-sm sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-4">
+                          <span className="text-xs font-medium text-muted-text">CSV line {issue.line_number}</span>
+                          <span className="break-words text-body-text">{issue.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 rounded-lg border border-status-good/20 bg-status-good/5 px-4 py-3 text-sm text-status-good">
+                  All rows imported successfully. No rows were skipped.
+                </p>
+              )}
+            </motion.section>
           ) : null}
         </CardContent>
       </Card>
       <Card className="overflow-hidden">
-        <CardHeader><CardTitle>Episode inventory</CardTitle><CardDescription>{episodes.length} matching episodes.</CardDescription></CardHeader>
+        <CardHeader className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div><CardTitle>Episode inventory</CardTitle><CardDescription>{isLoading ? "Refreshing matching episodes…" : `${totalEpisodes.toLocaleString()} matching episodes.`}</CardDescription></div>
+          <span className="rounded-full border border-border px-3 py-1 text-xs text-muted-text">{totalEpisodes.toLocaleString()} total</span>
+        </CardHeader>
         <div className="flex flex-col gap-3 border-y border-border px-5 py-4 sm:flex-row sm:items-center">
           <div className="relative min-w-0 flex-1">
             <Filter aria-hidden="true" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-text" />
-            <input aria-label="Filter episodes by task name" value={taskFilter} onChange={(event) => setTaskFilter(event.target.value)} placeholder="Filter by task name" className="min-h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-brand-navy outline-none placeholder:text-muted-text focus:border-brand-blue" />
+            <input aria-label="Filter episodes by task name" value={taskFilter} onChange={(event) => updateTaskFilter(event.target.value)} placeholder="Filter by task name" className="min-h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-brand-navy outline-none placeholder:text-muted-text focus:border-brand-blue" />
           </div>
-          <select aria-label="Filter episodes by quality" value={qualityFilter} onChange={(event) => setQualityFilter(event.target.value as Episode["quality"] | "")} className="min-h-10 rounded-lg border border-border bg-surface px-3 text-sm text-brand-navy outline-none focus:border-brand-blue sm:w-48">
+          <select aria-label="Filter episodes by quality" value={qualityFilter} onChange={(event) => updateQualityFilter(event.target.value as Episode["quality"] | "")} className="min-h-10 rounded-lg border border-border bg-surface px-3 text-sm text-brand-navy outline-none focus:border-brand-blue sm:w-48">
             <option value="">All qualities</option><option value="good">Good</option><option value="usable">Usable</option><option value="bad">Bad</option>
           </select>
+          <label className="flex min-h-10 items-center gap-2 text-xs text-body-text">
+            Rows
+            <select aria-label="Rows per page" value={pageSize} onChange={(event) => updatePageSize(Number(event.target.value))} className="min-h-10 rounded-lg border border-border bg-surface px-2.5 text-sm text-brand-navy outline-none focus:border-brand-blue">
+              <option value={10}>10</option><option value={25}>25</option><option value={50}>50</option>
+            </select>
+          </label>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="bg-page-background text-xs font-medium uppercase tracking-wide text-muted-text"><tr><th className="px-5 py-3">Episode</th><th className="px-5 py-3">Robot</th><th className="px-5 py-3">Task</th><th className="px-5 py-3">Recorded</th><th className="px-5 py-3">Quality</th></tr></thead>
             <tbody className="divide-y divide-border">
-              {episodes.map((episode) => <tr key={episode.id}><td className="px-5 py-3.5 font-medium text-brand-navy">{episode.episode_id}</td><td className="px-5 py-3.5 text-body-text">{episode.robot_id}</td><td className="max-w-[260px] truncate px-5 py-3.5 text-body-text">{episode.task_name}</td><td className="px-5 py-3.5 text-body-text">{new Date(episode.recorded_at).toLocaleDateString()}</td><td className="px-5 py-3.5"><QualityBadge quality={episode.quality} /></td></tr>)}
+              {!isLoading && !loadError ? episodes.map((episode, index) => (
+                <motion.tr
+                  key={episode.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.18, delay: Math.min(index * 0.015, 0.18) }}
+                  className="hover:bg-page-background/70"
+                >
+                  <td className="px-5 py-3.5 font-medium text-brand-navy">{episode.episode_id}</td>
+                  <td className="px-5 py-3.5 text-body-text">{episode.robot_id}</td>
+                  <td className="max-w-[260px] truncate px-5 py-3.5 text-body-text">{episode.task_name}</td>
+                  <td className="px-5 py-3.5 text-body-text">{new Date(episode.recorded_at).toLocaleDateString()}</td>
+                  <td className="px-5 py-3.5"><QualityBadge quality={episode.quality} /></td>
+                </motion.tr>
+              )) : null}
             </tbody>
           </table>
-          {isLoading ? <TableSkeleton columns={5} /> : null}
-          {!isLoading && episodes.length === 0 ? <EmptyMessage icon={<Archive size={24} />} title="No episodes available" detail="Recorded episodes will appear here." /> : null}
+          {isLoading ? <TableSkeleton columns={5} rows={pageSize} /> : null}
+          {!isLoading && loadError ? (
+            <div role="alert" className="px-5 py-12 text-center">
+              <p className="text-sm font-medium text-status-bad">Episodes could not be loaded</p>
+              <p className="mt-1 text-sm text-muted-text">{loadError}</p>
+              <button type="button" onClick={() => void loadEpisodes()} className="mt-4 cursor-pointer rounded-lg border border-border px-4 py-2 text-sm font-medium text-brand-navy hover:bg-page-background">Try again</button>
+            </div>
+          ) : null}
+          {!isLoading && !loadError && episodes.length === 0 ? <EmptyMessage icon={<Archive size={24} />} title={taskFilter || qualityFilter ? "No episodes match these filters" : "No episodes available"} detail={taskFilter || qualityFilter ? "Adjust the task or quality filters to see more episodes." : "Import a CSV export to add episodes to the inventory."} /> : null}
+        </div>
+        <div className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-text">Showing {firstResult.toLocaleString()}–{lastResult.toLocaleString()} of {totalEpisodes.toLocaleString()} episodes</p>
+          <div className="flex items-center justify-between gap-3 sm:justify-end">
+            <button type="button" disabled={pageIndex === 0 || isLoading} onClick={() => setPageIndex((current) => Math.max(0, current - 1))} className="min-h-9 cursor-pointer rounded-lg border border-border px-3 py-2 text-xs font-medium text-body-text hover:bg-page-background disabled:cursor-not-allowed disabled:opacity-50">Previous</button>
+            <span aria-live="polite" className="min-w-20 text-center text-xs tabular-nums text-muted-text">Page {pageIndex + 1} of {pageCount}</span>
+            <button type="button" disabled={pageIndex + 1 >= pageCount || isLoading} onClick={() => setPageIndex((current) => Math.min(pageCount - 1, current + 1))} className="min-h-9 cursor-pointer rounded-lg border border-border px-3 py-2 text-xs font-medium text-body-text hover:bg-page-background disabled:cursor-not-allowed disabled:opacity-50">Next</button>
+          </div>
         </div>
       </Card>
     </div>
@@ -1083,7 +1237,7 @@ function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: 
   return <section><p className="text-sm font-medium capitalize text-brand-blue">{eyebrow}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-brand-navy sm:text-3xl">{title}</h1><p className="mt-2 text-sm text-muted-text">{description}</p></section>;
 }
 
-function TableSkeleton({ columns }: { columns: number }) {
+function TableSkeleton({ columns, rows = 5 }: { columns: number; rows?: number }) {
   return (
     <motion.div
       aria-label="Loading table"
@@ -1092,7 +1246,7 @@ function TableSkeleton({ columns }: { columns: number }) {
       animate={{ opacity: [0.45, 0.85, 0.45] }}
       transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
     >
-      {Array.from({ length: 5 }, (_, row) => (
+      {Array.from({ length: Math.min(rows, 10) }, (_, row) => (
         <div key={row} className="flex gap-3">
           {Array.from({ length: columns }, (_, column) => (
             <span key={column} className="h-8 flex-1 rounded-md bg-page-background" />
@@ -1101,6 +1255,20 @@ function TableSkeleton({ columns }: { columns: number }) {
       ))}
       <span className="sr-only">Loading records…</span>
     </motion.div>
+  );
+}
+
+function ImportCount({ label, value, tone }: { label: string; value: number; tone: "neutral" | "good" | "warning" }) {
+  const color = tone === "good"
+    ? "text-status-good"
+    : tone === "warning"
+      ? "text-status-warning"
+      : "text-brand-navy";
+  return (
+    <div className="rounded-lg border border-border bg-surface px-3 py-2.5">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-text">{label}</p>
+      <p className={`mt-1 text-lg font-semibold tabular-nums ${color}`}>{value.toLocaleString()}</p>
+    </div>
   );
 }
 

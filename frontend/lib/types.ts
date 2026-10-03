@@ -38,6 +38,26 @@ export interface Episode {
   quality: EpisodeQuality;
 }
 
+export interface EpisodePage {
+  items: Episode[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface EpisodeImportIssue {
+  line_number: number;
+  reason: string;
+}
+
+export interface EpisodeImportSummary {
+  total_rows: number;
+  imported_count: number;
+  skipped_count: number;
+  reasons: string[];
+  skipped_rows: EpisodeImportIssue[];
+}
+
 export interface LoginPayload {
   email: string;
   password: string;

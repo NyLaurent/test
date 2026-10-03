@@ -20,6 +20,12 @@ class ImportSummary:
         self.imported_count = 0
         self.skipped_count = 0
         self.reasons: list[str] = []
+        self.skipped_rows: list[dict[str, int | str]] = []
+
+    def skip_row(self, line_number: int, reason: str) -> None:
+        self.skipped_count += 1
+        self.reasons.append(f"line {line_number}: {reason}")
+        self.skipped_rows.append({"line_number": line_number, "reason": reason})
 
 
 class EpisodeImportService:
@@ -81,8 +87,7 @@ class EpisodeImportService:
         for line_number, raw_row in enumerate(reader, start=2):
             summary.total_rows += 1
             if None in raw_row:
-                summary.skipped_count += 1
-                summary.reasons.append(f"line {line_number}: too many columns")
+                summary.skip_row(line_number, "too many columns")
                 continue
             row = EpisodeImportService.normalize_row(raw_row)
             try:
@@ -121,9 +126,8 @@ class EpisodeImportService:
                 summary.imported_count += 1
                 seen_ids.add(row["episode_id"])
             except (ValueError, TypeError, OverflowError, IntegrityError) as exc:
-                summary.skipped_count += 1
                 message = "already exists" if isinstance(exc, IntegrityError) else str(exc)
-                summary.reasons.append(f"line {line_number}: {message}")
+                summary.skip_row(line_number, message)
                 continue
 
         try:

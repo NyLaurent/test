@@ -19,6 +19,7 @@ def test_import_parses_timestamp_and_is_idempotent(db_session) -> None:
     assert second.imported_count == 0
     assert second.skipped_count == 1
     assert second.reasons == ["line 2: already exists"]
+    assert second.skipped_rows == [{"line_number": 2, "reason": "already exists"}]
     episode = db_session.query(Episode).one()
     assert episode.robot_id == "arm-01"
     assert episode.duration_seconds == 42
@@ -39,6 +40,10 @@ def test_invalid_row_does_not_poison_later_rows(db_session) -> None:
     assert summary.imported_count == 1
     assert summary.skipped_count == 1
     assert summary.reasons[0].startswith("line 2: invalid recorded_at")
+    assert summary.skipped_rows[0] == {
+        "line_number": 2,
+        "reason": "invalid recorded_at: not-a-timestamp",
+    }
     assert [episode.episode_id for episode in db_session.query(Episode).all()] == ["EP-IMPORT-2"]
 
 
@@ -58,6 +63,7 @@ def test_import_reports_missing_fields_duplicates_and_bad_duration(db_session) -
     assert "duplicate episode_id in file" in summary.reasons[0]
     assert "duration_seconds must be numeric" in summary.reasons[1]
     assert "missing episode_id" in summary.reasons[2]
+    assert [issue["line_number"] for issue in summary.skipped_rows] == [3, 4, 5]
 
 
 def test_csv_import_endpoint_requires_operations_role_and_csv_body(client, db_session) -> None:
@@ -100,3 +106,15 @@ def test_csv_import_endpoint_requires_operations_role_and_csv_body(client, db_se
     assert imported.status_code == 200
     assert imported.json()["imported_count"] == 1
     assert imported.json()["skipped_count"] == 0
+    assert imported.json()["skipped_rows"] == []
+
+    repeated = client.post(
+        "/api/episodes/import",
+        content=CSV_HEADER + GOOD_ROW,
+        headers={"Content-Type": "text/csv", "Authorization": f"Bearer {operator_token}"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["imported_count"] == 0
+    assert repeated.json()["skipped_rows"] == [
+        {"line_number": 2, "reason": "already exists"}
+    ]

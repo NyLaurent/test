@@ -1,8 +1,20 @@
-import type { AnalyticsResponse, ApiError, Episode, LoginPayload, RequestRecord, User, UserRole } from "./types";
+import type {
+  AnalyticsResponse,
+  ApiError,
+  Episode,
+  EpisodeImportSummary,
+  EpisodePage,
+  LoginPayload,
+  RequestRecord,
+  User,
+  UserRole,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 export const AUTH_TOKEN_STORAGE_KEY = "dataset-request-desk-token";
+export const REFRESH_TOKEN_STORAGE_KEY = "dataset-request-desk-refresh-token";
 export const AUTH_EXPIRED_EVENT = "dataset-request-desk:auth-expired";
+export const AUTH_TOKEN_REFRESHED_EVENT = "dataset-request-desk:token-refreshed";
 
 export class ApiRequestError extends Error {
   constructor(message: string, readonly status: number) {
@@ -11,43 +23,129 @@ export class ApiRequestError extends Error {
   }
 }
 
+let refreshRequest: Promise<string | null> | null = null;
+
+async function refreshAccessToken(rejectedAccessToken: string): Promise<string | null> {
+  if (refreshRequest) return refreshRequest;
+
+  const refresh = async (): Promise<string | null> => {
+    const latestAccessToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (latestAccessToken && latestAccessToken !== rejectedAccessToken) return latestAccessToken;
+
+    const refreshToken = window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+    if (!refreshToken) {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, {
+        detail: "Your session has expired. Please sign in again.",
+      }));
+      return null;
+    }
+
+    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const contentType = response.headers.get("content-type") ?? "";
+    const payload = contentType.includes("application/json") ? await response.json() : null;
+    if (!response.ok) {
+      const currentAccessToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+      const currentRefreshToken = window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+      if (
+        currentAccessToken !== rejectedAccessToken
+        || currentRefreshToken !== refreshToken
+      ) {
+        return currentAccessToken;
+      }
+      const detail = (payload as ApiError | null)?.detail;
+      if (response.status === 401) {
+        window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+        window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, {
+          detail: typeof detail === "string" ? detail : "Your session has expired. Please sign in again.",
+        }));
+      }
+      throw new ApiRequestError(typeof detail === "string" ? detail : "Could not refresh session", response.status);
+    }
+
+    const tokens = payload as { access_token: string; refresh_token: string };
+    if (typeof tokens.access_token !== "string" || typeof tokens.refresh_token !== "string") {
+      throw new ApiRequestError("The API returned an incomplete session", 502);
+    }
+    const currentAccessToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    const currentRefreshToken = window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+    if (
+      currentAccessToken !== rejectedAccessToken
+      || currentRefreshToken !== refreshToken
+    ) {
+      return currentAccessToken;
+    }
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, tokens.access_token);
+    window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokens.refresh_token);
+    window.dispatchEvent(new CustomEvent(AUTH_TOKEN_REFRESHED_EVENT, {
+      detail: tokens.access_token,
+    }));
+    return tokens.access_token;
+  };
+
+  const crossTabRefresh: Promise<string | null> = typeof navigator !== "undefined" && navigator.locks
+    ? navigator.locks.request<Promise<string | null>>(
+      "dataset-request-desk:token-refresh",
+      refresh,
+    ).then((result) => result)
+    : refresh();
+  refreshRequest = crossTabRefresh;
+
+  try {
+    return await refreshRequest;
+  } finally {
+    refreshRequest = null;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit, token?: string): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
   if (!headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+
+  let activeToken = token;
+  if (activeToken && typeof window !== "undefined") {
+    activeToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? activeToken;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  const send = (accessToken?: string) => {
+    const requestHeaders = new Headers(headers);
+    if (accessToken) requestHeaders.set("Authorization", `******`);
+    return fetch(`${API_BASE}${path}`, { ...init, headers: requestHeaders });
+  };
+
+  let response = await send(activeToken);
+  if (response.status === 401 && activeToken && typeof window !== "undefined") {
+    const latestToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    const replacementToken = latestToken && latestToken !== activeToken
+      ? latestToken
+      : await refreshAccessToken(activeToken);
+    if (replacementToken) response = await send(replacementToken);
+  }
 
   const contentType = response.headers.get("content-type") ?? "";
   const payload = contentType.includes("application/json") ? await response.json() : null;
-
   if (!response.ok) {
     const detail = (payload as ApiError | null)?.detail;
-    const errorDetail = typeof detail === "string" ? detail : "Request failed";
-    if (
-      response.status === 401
-      && token
-      && typeof window !== "undefined"
-      && window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) === token
-    ) {
-      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: errorDetail }));
-    }
-    throw new ApiRequestError(errorDetail, response.status);
+    throw new ApiRequestError(typeof detail === "string" ? detail : "Request failed", response.status);
   }
-
   return payload as T;
 }
 
 export async function loginUser(payload: LoginPayload) {
-  const result = await apiFetch<{ access_token: string; token_type: string }>("/api/auth/login", {
+  const result = await apiFetch<{
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+    token_type: string;
+  }>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -55,8 +153,21 @@ export async function loginUser(payload: LoginPayload) {
   return result;
 }
 
+export async function logoutUser(refreshToken: string): Promise<void> {
+  await apiFetch<void>("/api/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
 export async function getCurrentUser(token: string): Promise<User> {
-  return apiFetch<User>("/api/auth/me", { method: "GET" }, token);
+  if (!token.trim()) {
+    throw new ApiRequestError("An access token is required to load the current user", 401);
+  }
+  return apiFetch<User>("/api/auth/me", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  }, token);
 }
 
 export async function getAdminUsers(token: string): Promise<User[]> {
@@ -137,13 +248,26 @@ export async function getEpisodes(
   return apiFetch<Episode[]>(`/api/episodes${query}`, { method: "GET" }, token);
 }
 
+export async function getEpisodePage(
+  token: string,
+  filters: {
+    taskName?: string;
+    quality?: Episode["quality"];
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<EpisodePage> {
+  const searchParams = new URLSearchParams({
+    limit: String(filters.limit ?? 25),
+    offset: String(filters.offset ?? 0),
+  });
+  if (filters.taskName) searchParams.set("task_name", filters.taskName);
+  if (filters.quality) searchParams.set("quality", filters.quality);
+  return apiFetch<EpisodePage>(`/api/episodes/page?${searchParams.toString()}`, { method: "GET" }, token);
+}
+
 export async function importEpisodes(csvText: string, token: string) {
-  return apiFetch<{
-    total_rows: number;
-    imported_count: number;
-    skipped_count: number;
-    reasons: string[];
-  }>("/api/episodes/import", {
+  return apiFetch<EpisodeImportSummary>("/api/episodes/import", {
     method: "POST",
     headers: { "Content-Type": "text/csv" },
     body: csvText,

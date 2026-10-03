@@ -18,8 +18,21 @@ class EpisodeRead(BaseModel):
     quality: str
 
 
+class EpisodeImportIssue(BaseModel):
+    line_number: int
+    reason: str
+
+
 class EpisodeImportSummary(BaseModel):
     total_rows: int
     imported_count: int
     skipped_count: int
     reasons: list[str]
+    skipped_rows: list[EpisodeImportIssue]
+
+
+class EpisodePage(BaseModel):
+    items: list[EpisodeRead]
+    total: int
+    limit: int
+    offset: int

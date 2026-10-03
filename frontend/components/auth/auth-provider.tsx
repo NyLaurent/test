@@ -6,13 +6,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { getCurrentUser, loginUser } from "@/lib/api";
+import { getCurrentUser, loginUser, logoutUser } from "@/lib/api";
 import type { LoginPayload, User } from "@/lib/types";
 import { useToast } from "@/components/toast/toast-provider";
-import { ApiRequestError, AUTH_EXPIRED_EVENT, AUTH_TOKEN_STORAGE_KEY } from "@/lib/api";
+import {
+  ApiRequestError,
+  AUTH_EXPIRED_EVENT,
+  AUTH_TOKEN_REFRESHED_EVENT,
+  AUTH_TOKEN_STORAGE_KEY,
+  REFRESH_TOKEN_STORAGE_KEY,
+} from "@/lib/api";
 
 
 type AuthContextValue = {
@@ -30,9 +37,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const authOperation = useRef(0);
 
   useEffect(() => {
     function handleExpiredSession(event: Event) {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
       setToken(null);
       setUser(null);
       setIsLoading(false);
@@ -51,6 +61,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   useEffect(() => {
+    function handleTokenRefreshed(event: Event) {
+      if (event instanceof CustomEvent && typeof event.detail === "string") {
+        setToken(event.detail);
+      }
+    }
+
+    function handleStorageChange(event: StorageEvent) {
+      if (event.key === AUTH_TOKEN_STORAGE_KEY && event.newValue) {
+        setToken(event.newValue);
+      } else if (event.key === AUTH_TOKEN_STORAGE_KEY && event.newValue === null) {
+        setToken(null);
+        setUser(null);
+      }
+    }
+
+    window.addEventListener(AUTH_TOKEN_REFRESHED_EVENT, handleTokenRefreshed);
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener(AUTH_TOKEN_REFRESHED_EVENT, handleTokenRefreshed);
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const savedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     if (!savedToken) {
       queueMicrotask(() => setIsLoading(false));
@@ -58,10 +92,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let isActive = true;
+    const operation = ++authOperation.current;
     void getCurrentUser(savedToken)
       .then((currentUser) => {
-        if (isActive) {
-          setToken(savedToken);
+        if (isActive && operation === authOperation.current) {
+          setToken(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? savedToken);
           setUser(currentUser);
         }
       })
@@ -75,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       })
       .finally(() => {
-        if (isActive) setIsLoading(false);
+        if (isActive && operation === authOperation.current) setIsLoading(false);
       });
 
     return () => {
@@ -84,15 +119,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   useEffect(() => {
-    if (user) return;
+    if (user || isLoading) return;
 
     async function retrySavedSession() {
       const savedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
       if (!savedToken) return;
+      const operation = ++authOperation.current;
       setIsLoading(true);
       try {
         const currentUser = await getCurrentUser(savedToken);
-        setToken(savedToken);
+        if (operation !== authOperation.current) return;
+        setToken(window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? savedToken);
         setUser(currentUser);
       } catch (cause: unknown) {
         if (!(cause instanceof ApiRequestError && cause.status === 401)) {
@@ -103,36 +140,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
         }
       } finally {
-        setIsLoading(false);
+        if (operation === authOperation.current) setIsLoading(false);
       }
     }
 
     window.addEventListener("online", retrySavedSession);
-    window.addEventListener("focus", retrySavedSession);
     return () => {
       window.removeEventListener("online", retrySavedSession);
-      window.removeEventListener("focus", retrySavedSession);
     };
-  }, [showToast, user]);
+  }, [isLoading, showToast, user]);
 
   const login = useCallback(async (credentials: LoginPayload) => {
-    const result = await loginUser(credentials);
-    const currentUser = await getCurrentUser(result.access_token);
-    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, result.access_token);
-    setToken(result.access_token);
-    setUser(currentUser);
-    showToast({
-      kind: "success",
-      title: "Signed in successfully",
-      description: `Welcome back${currentUser.full_name ? `, ${currentUser.full_name}` : ""}.`,
-    });
-    return currentUser;
+    const operation = ++authOperation.current;
+    setIsLoading(true);
+    try {
+      const result = await loginUser(credentials);
+      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, result.access_token);
+      window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, result.refresh_token);
+      const currentUser = await getCurrentUser(result.access_token);
+      if (operation !== authOperation.current) return currentUser;
+      const currentToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? result.access_token;
+      setToken(currentToken);
+      setUser(currentUser);
+      showToast({
+        kind: "success",
+        title: "Signed in successfully",
+        description: `Welcome back${currentUser.full_name ? `, ${currentUser.full_name}` : ""}.`,
+      });
+      return currentUser;
+    } finally {
+      if (operation === authOperation.current) setIsLoading(false);
+    }
   }, [showToast]);
 
   const logout = useCallback(() => {
+    authOperation.current += 1;
+    const refreshToken = window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
     window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
     setToken(null);
     setUser(null);
+    if (refreshToken) {
+      void logoutUser(refreshToken).catch(() => {
+        showToast({
+          kind: "info",
+          title: "Signed out on this device",
+          description: "The server could not be reached to revoke this session. Its refresh token will expire automatically.",
+        });
+      });
+    }
     showToast({
       kind: "success",
       title: "Signed out",
