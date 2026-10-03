@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
@@ -10,20 +10,24 @@ import { useToast } from "@/components/toast/toast-provider";
 
 export function LoginForm() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, user, isLoading } = useAuth();
   const { showToast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (!isLoading && user) router.replace(`/${user.role}`);
+  }, [isLoading, router, user]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
 
     try {
-      await login({ email, password });
-      router.replace("/portal");
+      const authenticatedUser = await login({ email, password });
+      router.replace(`/${authenticatedUser.role}`);
     } catch (cause) {
       showToast({
         kind: "error",

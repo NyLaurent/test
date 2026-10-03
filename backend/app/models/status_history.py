@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -10,6 +10,9 @@ from app.db.base import Base
 
 class StatusHistory(Base):
     __tablename__ = "status_history"
+    __table_args__ = (
+        Index("ix_status_history_to_status_request_changed", "to_status", "request_id", "changed_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     request_id: Mapped[int] = mapped_column(ForeignKey("dataset_requests.id"), nullable=False, index=True)

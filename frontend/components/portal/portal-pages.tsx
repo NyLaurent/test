@@ -14,10 +14,13 @@ import {
   Eye,
   FilePlus2,
   Files,
+  FileUp,
+  Filter,
   Pencil,
   Plus,
   Trash2,
   Timer,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
@@ -34,16 +37,21 @@ import { Dialog } from "@/components/ui/dialog";
 import {
   assignEpisodeToRequest,
   createRequest,
+  createAdminUser,
   deleteRequest,
   editRequest,
   getAnalytics,
+  getAdminUsers,
   getEpisodes,
+  getRequestEpisodes,
   getRequests,
+  importEpisodes,
+  updateAdminUser,
   updateRequestStatus,
 } from "@/lib/api";
-import type { AnalyticsResponse, Episode, RequestRecord, RequestStatus } from "@/lib/types";
+import type { AnalyticsResponse, Episode, RequestRecord, RequestStatus, User, UserRole } from "@/lib/types";
 
-export type PortalPageSection = "overview" | "requests" | "new-request" | "episodes" | "analytics" | "profile";
+export type PortalPageSection = "overview" | "requests" | "new-request" | "episodes" | "analytics" | "profile" | "users";
 
 const nextStatuses: Partial<Record<RequestStatus, RequestStatus>> = {
   submitted: "in_progress",
@@ -56,6 +64,7 @@ export function PortalRoutePage({ section }: { section: PortalPageSection }) {
   if (!user) return null;
 
   if (section === "profile") return <ProfilePage />;
+  if (section === "users") return user.role === "admin" ? <AdminUsersPage /> : <UnavailablePage title="User management" />;
   if (section === "new-request") return user.role === "client" ? <NewRequestPage /> : <UnavailablePage title="New dataset request" />;
   if (section === "requests") return user.role === "client" ? <ClientRequestsPage /> : <OperatorRequestsPage />;
   if (section === "episodes") return user.role === "client" ? <UnavailablePage title="Episode inventory" /> : <EpisodesPage />;
@@ -63,7 +72,7 @@ export function PortalRoutePage({ section }: { section: PortalPageSection }) {
   return user.role === "client" ? <ClientOverview /> : <OperatorOverview />;
 }
 
-function useWorkspaceData(options: { requests?: boolean; episodes?: boolean; analytics?: boolean }) {
+function useWorkspaceData(options: { requests?: boolean; episodes?: boolean; availableEpisodesOnly?: boolean; analytics?: boolean }) {
   const { token } = useAuth();
   const { showToast } = useToast();
   const [requests, setRequests] = useState<RequestRecord[]>([]);
@@ -75,13 +84,13 @@ function useWorkspaceData(options: { requests?: boolean; episodes?: boolean; ana
     if (!token) return;
     const [requestData, episodeData, analyticsData] = await Promise.all([
       options.requests ? getRequests(token) : Promise.resolve(null),
-      options.episodes ? getEpisodes(token) : Promise.resolve(null),
+      options.episodes ? getEpisodes(token, { availableOnly: options.availableEpisodesOnly }) : Promise.resolve(null),
       options.analytics ? getAnalytics(token) : Promise.resolve(null),
     ]);
     if (requestData) setRequests(requestData);
     if (episodeData) setEpisodes(episodeData);
     if (analyticsData) setAnalytics(analyticsData);
-  }, [options.analytics, options.episodes, options.requests, token]);
+  }, [options.analytics, options.availableEpisodesOnly, options.episodes, options.requests, token]);
 
   useEffect(() => {
     // Loading API data in this effect is intentional.
@@ -208,7 +217,7 @@ function OperatorOverview() {
         <DailyEpisodesChart analytics={analytics} />
         <RequestStatusChart data={analytics?.request_fulfilment ?? []} />
       </section>
-      <Link href="/portal/requests" className="inline-flex rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-body-text hover:bg-surface">
+      <Link href={`/${user?.role}/requests`} className="inline-flex rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-body-text hover:bg-surface">
         Open request queue
       </Link>
     </div>
@@ -558,9 +567,36 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 function OperatorRequestsPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
-  const data = useWorkspaceData({ requests: true, episodes: true });
+  const data = useWorkspaceData({ requests: true, episodes: true, availableEpisodesOnly: true });
   const [selectionByRequest, setSelectionByRequest] = useState<Record<number, string>>({});
+  const [assignmentTaskFilter, setAssignmentTaskFilter] = useState("");
+  const [assignmentQualityFilter, setAssignmentQualityFilter] = useState<Episode["quality"] | "">("");
+  const [viewingRequest, setViewingRequest] = useState<RequestRecord | null>(null);
+  const [assignedEpisodes, setAssignedEpisodes] = useState<Episode[]>([]);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const eligibleEpisodes = data.episodes.filter((episode) => episode.quality === "good" || episode.quality === "usable");
+  const visibleEligibleEpisodes = eligibleEpisodes.filter((episode) => {
+    const matchesTask = episode.task_name.toLowerCase().includes(assignmentTaskFilter.trim().toLowerCase());
+    const matchesQuality = !assignmentQualityFilter || episode.quality === assignmentQualityFilter;
+    return matchesTask && matchesQuality;
+  });
+
+  async function viewRequest(request: RequestRecord) {
+    setViewingRequest(request);
+    setIsLoadingDetails(true);
+    setAssignedEpisodes([]);
+    if (!token) {
+      setIsLoadingDetails(false);
+      return;
+    }
+    try {
+      setAssignedEpisodes(await getRequestEpisodes(request.id, token));
+    } catch (cause) {
+      showToast({ kind: "error", title: "Could not load request details", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  }
 
   async function updateStatus(request: RequestRecord, status: RequestStatus) {
     if (!token) return;
@@ -614,10 +650,21 @@ function OperatorRequestsPage() {
           <div><CardTitle>All requests</CardTitle><CardDescription>Manage requests submitted by clients.</CardDescription></div>
           <span className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-text">{data.requests.length} requests</span>
         </CardHeader>
+        <div className="flex flex-col gap-3 border-y border-border bg-surface px-5 py-4 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Filter aria-hidden="true" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-text" />
+            <input aria-label="Filter assignable episodes by task" value={assignmentTaskFilter} onChange={(event) => setAssignmentTaskFilter(event.target.value)} placeholder="Filter episodes by task name" className="min-h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-brand-navy outline-none placeholder:text-muted-text focus:border-brand-blue" />
+          </div>
+          <select aria-label="Filter assignable episodes by quality" value={assignmentQualityFilter} onChange={(event) => setAssignmentQualityFilter(event.target.value as Episode["quality"] | "")} className="min-h-10 rounded-lg border border-border bg-surface px-3 text-sm text-brand-navy outline-none focus:border-brand-blue sm:w-48">
+            <option value="">All assignable quality</option>
+            <option value="good">Good</option>
+            <option value="usable">Usable</option>
+          </select>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] text-left text-sm">
             <thead className="bg-page-background text-xs font-medium uppercase tracking-wide text-muted-text">
-              <tr><th className="px-5 py-3">Dataset request</th><th className="px-5 py-3">Client</th><th className="px-5 py-3">Episodes</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Assign episode</th><th className="px-5 py-3 text-right">Workflow</th></tr>
+              <tr><th className="px-5 py-3">Dataset request</th><th className="px-5 py-3">Client</th><th className="px-5 py-3">Episodes</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Assign episode</th><th className="px-5 py-3 text-right">Actions</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
               {data.requests.map((request) => {
@@ -634,30 +681,58 @@ function OperatorRequestsPage() {
                         <div className="flex min-w-[290px] items-center gap-2">
                           <select aria-label={`Episode for request ${request.id}`} value={selectionByRequest[request.id] ?? ""} onChange={(event) => setSelectionByRequest((current) => ({ ...current, [request.id]: event.target.value }))} className="min-w-0 flex-1 rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-body-text outline-none focus:border-brand-blue">
                             <option value="">Select an episode</option>
-                            {eligibleEpisodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.episode_id} · {episode.robot_id} · {episode.quality}</option>)}
+                            {visibleEligibleEpisodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.episode_id} · {episode.task_name} · {episode.quality}</option>)}
                           </select>
                           <button type="button" onClick={() => void assignEpisode(request.id)} className="cursor-pointer rounded-md border border-brand-blue px-2.5 py-2 text-xs font-medium text-brand-blue hover:bg-brand-soft-blue">Assign</button>
                         </div>
                       ) : <span className="text-xs text-muted-text">Available in progress</span>}
                     </td>
                     <td className="px-5 py-4 text-right">
-                      {nextStatus ? <button type="button" onClick={() => void updateStatus(request, nextStatus)} className="cursor-pointer whitespace-nowrap rounded-md bg-brand-blue px-3 py-2 text-xs font-medium text-white hover:bg-brand-blue-hover">Move to {nextStatus.replace("_", " ")}</button> : <span className="text-xs text-muted-text">Awaiting client</span>}
+                      <div className="flex items-center justify-end gap-2">
+                        <button type="button" onClick={() => void viewRequest(request)} className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-2.5 py-2 text-xs font-medium text-body-text hover:bg-page-background"><Eye aria-hidden="true" size={14} />View</button>
+                        {nextStatus ? <button type="button" onClick={() => void updateStatus(request, nextStatus)} className="cursor-pointer whitespace-nowrap rounded-md bg-brand-blue px-3 py-2 text-xs font-medium text-white hover:bg-brand-blue-hover">Move to {nextStatus.replace("_", " ")}</button> : <span className="text-xs text-muted-text">Awaiting client</span>}
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {data.isLoading ? <LoadingMessage>Loading request queue…</LoadingMessage> : null}
+          {data.isLoading ? <TableSkeleton columns={6} /> : null}
           {!data.isLoading && data.requests.length === 0 ? <EmptyMessage icon={<Files size={24} />} title="The queue is empty" detail="Requests submitted by clients will appear here." /> : null}
         </div>
       </Card>
+      {viewingRequest ? (
+        <Dialog
+          open
+          title={`Request #${viewingRequest.id}`}
+          description="Request details and the episodes currently assigned to this delivery."
+          onClose={() => setViewingRequest(null)}
+          footer={<div className="flex justify-end"><button type="button" onClick={() => setViewingRequest(null)} className="min-h-10 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover">Close</button></div>}
+        >
+          <dl className="divide-y divide-border">
+            <DetailRow label="Task">{viewingRequest.task_name}</DetailRow>
+            <DetailRow label="Client">Client #{viewingRequest.client_id}</DetailRow>
+            <DetailRow label="Status"><RequestStatusBadge status={viewingRequest.status} /></DetailRow>
+            <DetailRow label="Episodes requested">{viewingRequest.episodes_requested}</DetailRow>
+            <DetailRow label="Deadline">{displayDate(viewingRequest.deadline)}</DetailRow>
+            <DetailRow label="Notes">{viewingRequest.notes || "No notes provided."}</DetailRow>
+            <DetailRow label="Assigned episodes">
+              {isLoadingDetails ? "Loading assigned episodes…" : assignedEpisodes.length
+                ? <ul className="space-y-1">{assignedEpisodes.map((episode) => <li key={episode.id}>{episode.episode_id} · {episode.task_name} · {episode.quality}</li>)}</ul>
+                : "No episodes assigned yet."}
+            </DetailRow>
+          </dl>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
 
 function NewRequestPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const requestsPath = user ? `/${user.role}/requests` : "/login";
   const [open, setOpen] = useState(false);
 
   return (
@@ -675,9 +750,9 @@ function NewRequestPage() {
           mode="create"
           onClose={() => {
             setOpen(false);
-            router.replace("/portal/requests");
+            router.replace(requestsPath);
           }}
-          onSaved={() => router.replace("/portal/requests")}
+          onSaved={() => router.replace(requestsPath)}
         />
       ) : null}
     </div>
@@ -685,12 +760,95 @@ function NewRequestPage() {
 }
 
 function EpisodesPage() {
-  const { episodes, isLoading } = useWorkspaceData({ episodes: true });
+  const { token } = useAuth();
+  const { showToast } = useToast();
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [taskFilter, setTaskFilter] = useState("");
+  const [qualityFilter, setQualityFilter] = useState<Episode["quality"] | "">("");
+  const [isImporting, setIsImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<Awaited<ReturnType<typeof importEpisodes>> | null>(null);
+
+  const loadEpisodes = useCallback(async () => {
+    if (!token) return;
+    setIsLoading(true);
+    try {
+      const results = await getEpisodes(token, {
+        taskName: taskFilter.trim() || undefined,
+        quality: qualityFilter || undefined,
+      });
+      setEpisodes(results);
+    } catch (cause) {
+      showToast({ kind: "error", title: "Could not load episodes", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [qualityFilter, showToast, taskFilter, token]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void loadEpisodes(), 250);
+    return () => window.clearTimeout(timeout);
+  }, [loadEpisodes]);
+
+  async function handleImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const input = event.currentTarget.elements.namedItem("episode-csv");
+    const file = input instanceof HTMLInputElement ? input.files?.[0] : undefined;
+    if (!file || !token) {
+      showToast({ kind: "error", title: "Choose a CSV file", description: "Select an episode export before starting the import." });
+      return;
+    }
+    setIsImporting(true);
+    setImportSummary(null);
+    try {
+      const result = await importEpisodes(await file.text(), token);
+      setImportSummary(result);
+      showToast({
+        kind: "success",
+        title: "Episode import complete",
+        description: `${result.imported_count} imported; ${result.skipped_count} skipped.`,
+      });
+      await loadEpisodes();
+    } catch (cause) {
+      showToast({ kind: "error", title: "Episode import failed", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeading eyebrow="Operations workspace" title="Episode inventory" description="Browse recently recorded episodes and their quality." />
+      <Card>
+        <CardHeader><CardTitle>Import episode CSV</CardTitle><CardDescription>Upload a recording-system export. Re-imports are safe; duplicate and invalid rows are reported.</CardDescription></CardHeader>
+        <CardContent>
+          <form onSubmit={(event) => void handleImport(event)} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1 text-sm font-medium text-brand-navy">CSV file
+              <input name="episode-csv" type="file" accept=".csv,text/csv" className="mt-2 block w-full cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-sm text-body-text file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-brand-soft-blue file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-blue" />
+            </label>
+            <button type="submit" disabled={isImporting} className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
+              <FileUp aria-hidden="true" size={16} />{isImporting ? "Importing…" : "Import CSV"}
+            </button>
+          </form>
+          {importSummary ? (
+            <div aria-live="polite" className="mt-4 rounded-lg border border-border bg-page-background p-4 text-sm">
+              <p className="font-medium text-brand-navy">{importSummary.total_rows} rows · {importSummary.imported_count} imported · {importSummary.skipped_count} skipped</p>
+              {importSummary.reasons.length ? <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-xs text-muted-text">{importSummary.reasons.map((reason, index) => <li key={`${index}-${reason}`}>{reason}</li>)}</ul> : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
       <Card className="overflow-hidden">
-        <CardHeader><CardTitle>Available episodes</CardTitle><CardDescription>{episodes.length} episodes in inventory.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Episode inventory</CardTitle><CardDescription>{episodes.length} matching episodes.</CardDescription></CardHeader>
+        <div className="flex flex-col gap-3 border-y border-border px-5 py-4 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Filter aria-hidden="true" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-text" />
+            <input aria-label="Filter episodes by task name" value={taskFilter} onChange={(event) => setTaskFilter(event.target.value)} placeholder="Filter by task name" className="min-h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-brand-navy outline-none placeholder:text-muted-text focus:border-brand-blue" />
+          </div>
+          <select aria-label="Filter episodes by quality" value={qualityFilter} onChange={(event) => setQualityFilter(event.target.value as Episode["quality"] | "")} className="min-h-10 rounded-lg border border-border bg-surface px-3 text-sm text-brand-navy outline-none focus:border-brand-blue sm:w-48">
+            <option value="">All qualities</option><option value="good">Good</option><option value="usable">Usable</option><option value="bad">Bad</option>
+          </select>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="bg-page-background text-xs font-medium uppercase tracking-wide text-muted-text"><tr><th className="px-5 py-3">Episode</th><th className="px-5 py-3">Robot</th><th className="px-5 py-3">Task</th><th className="px-5 py-3">Recorded</th><th className="px-5 py-3">Quality</th></tr></thead>
@@ -698,7 +856,7 @@ function EpisodesPage() {
               {episodes.map((episode) => <tr key={episode.id}><td className="px-5 py-3.5 font-medium text-brand-navy">{episode.episode_id}</td><td className="px-5 py-3.5 text-body-text">{episode.robot_id}</td><td className="max-w-[260px] truncate px-5 py-3.5 text-body-text">{episode.task_name}</td><td className="px-5 py-3.5 text-body-text">{new Date(episode.recorded_at).toLocaleDateString()}</td><td className="px-5 py-3.5"><QualityBadge quality={episode.quality} /></td></tr>)}
             </tbody>
           </table>
-          {isLoading ? <LoadingMessage>Loading episodes…</LoadingMessage> : null}
+          {isLoading ? <TableSkeleton columns={5} /> : null}
           {!isLoading && episodes.length === 0 ? <EmptyMessage icon={<Archive size={24} />} title="No episodes available" detail="Recorded episodes will appear here." /> : null}
         </div>
       </Card>
@@ -711,21 +869,185 @@ function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <PageHeading eyebrow="Operations workspace" title="Analytics" description="Track episode collection and request fulfilment." />
-      {isLoading ? <p className="text-sm text-muted-text">Loading analytics…</p> : null}
-      <section className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
-        <DailyEpisodesChart analytics={analytics} />
-        <RequestStatusChart data={analytics?.request_fulfilment ?? []} />
-      </section>
-      <Card>
-        <CardHeader><CardTitle>Top tasks by good episodes</CardTitle><CardDescription>Task labels with the highest number of good-quality recordings.</CardDescription></CardHeader>
-        <CardContent className="p-0">
-          {analytics?.top_good_tasks.length ? (
-            <div className="divide-y divide-border">
-              {analytics.top_good_tasks.map((task, index) => <div key={task.task_name} className="flex items-center gap-4 px-5 py-3.5 sm:px-6"><span className="w-7 text-xs font-medium tabular-nums text-muted-text">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-sm font-medium text-brand-navy">{task.task_name}</span><span className="text-sm tabular-nums text-body-text">{task.good_episode_count} episodes</span></div>)}
-            </div>
-          ) : <p className="px-5 py-8 text-sm text-muted-text sm:px-6">No good-quality episode data is available yet.</p>}
-        </CardContent>
+      {isLoading ? <AnalyticsSkeleton /> : null}
+      {!isLoading ? (
+        <>
+          <section className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
+            <DailyEpisodesChart analytics={analytics} />
+            <RequestStatusChart data={analytics?.request_fulfilment ?? []} />
+          </section>
+          <Card>
+            <CardHeader><CardTitle>Top tasks by good episodes</CardTitle><CardDescription>Task labels with the highest number of good-quality recordings.</CardDescription></CardHeader>
+            <CardContent className="p-0">
+              {analytics?.top_good_tasks.length ? (
+                <div className="divide-y divide-border">
+                  {analytics.top_good_tasks.map((task, index) => <div key={task.task_name} className="flex items-center gap-4 px-5 py-3.5 sm:px-6"><span className="w-7 text-xs font-medium tabular-nums text-muted-text">{String(index + 1).padStart(2, "0")}</span><span className="min-w-0 flex-1 truncate text-sm font-medium text-brand-navy">{task.task_name}</span><span className="text-sm tabular-nums text-body-text">{task.good_episode_count} episodes</span></div>)}
+                </div>
+              ) : <p className="px-5 py-8 text-sm text-muted-text sm:px-6">No good-quality episode data is available yet.</p>}
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function AdminUsersPage() {
+  const { user: currentUser, token } = useAuth();
+  const { showToast } = useToast();
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [roleByUser, setRoleByUser] = useState<Record<number, UserRole>>({});
+  const [confirmingUser, setConfirmingUser] = useState<User | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const loadUsers = useCallback(async () => {
+    if (!token) return;
+    setIsLoading(true);
+    try {
+      setUsers(await getAdminUsers(token));
+    } catch (cause) {
+      showToast({ kind: "error", title: "Could not load users", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [showToast, token]);
+
+  useEffect(() => {
+    // Loading account data in this effect is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadUsers();
+  }, [loadUsers]);
+
+  async function createUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) return;
+    const formData = new FormData(event.currentTarget);
+    const fullName = String(formData.get("full-name") || "").trim();
+    setIsCreating(true);
+    try {
+      await createAdminUser({
+        email: String(formData.get("email") || ""),
+        password: String(formData.get("password") || ""),
+        role: String(formData.get("role") || "client") as UserRole,
+        ...(fullName ? { full_name: fullName } : {}),
+      }, token);
+      showToast({ kind: "success", title: "User created", description: "The new account can now sign in." });
+      setCreateDialogOpen(false);
+      await loadUsers();
+    } catch (cause) {
+      showToast({ kind: "error", title: "Could not create user", description: cause instanceof Error ? cause.message : "Please check the form and try again." });
+    } finally {
+      setIsCreating(false);
+    }
+  }
+
+  async function saveRole(target: User) {
+    if (!token) return;
+    const role = roleByUser[target.id] ?? target.role;
+    if (role === target.role) return;
+    setIsUpdating(true);
+    try {
+      const updated = await updateAdminUser(target.id, { role }, token);
+      setUsers((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setRoleByUser((current) => ({ ...current, [updated.id]: updated.role }));
+      showToast({ kind: "success", title: "Role updated", description: `${updated.email} is now ${updated.role}.` });
+    } catch (cause) {
+      showToast({ kind: "error", title: "Could not update role", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  async function toggleActive() {
+    if (!token || !confirmingUser) return;
+    const target = confirmingUser;
+    setIsUpdating(true);
+    try {
+      const updated = await updateAdminUser(target.id, { is_active: !target.is_active }, token);
+      setUsers((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setConfirmingUser(null);
+      showToast({
+        kind: "success",
+        title: updated.is_active ? "User reactivated" : "User deactivated",
+        description: updated.is_active ? `${updated.email} can sign in again.` : `${updated.email} can no longer sign in.`,
+      });
+    } catch (cause) {
+      showToast({ kind: "error", title: "Could not update account", description: cause instanceof Error ? cause.message : "Please try again." });
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeading eyebrow="Administration" title="User management" description="Create accounts, change roles, and deactivate access when needed." />
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div><CardTitle>Workspace accounts</CardTitle><CardDescription>{users.length} registered users.</CardDescription></div>
+          <button type="button" onClick={() => setCreateDialogOpen(true)} className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover">
+            <Plus aria-hidden="true" size={16} />Create user
+          </button>
+        </CardHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="bg-page-background text-xs font-medium uppercase tracking-wide text-muted-text"><tr><th className="px-5 py-3">Account</th><th className="px-5 py-3">Role</th><th className="px-5 py-3">Status</th><th className="px-5 py-3 text-right">Access</th></tr></thead>
+            <tbody className="divide-y divide-border">
+              {users.map((account) => {
+                const isSelf = account.id === currentUser?.id;
+                return (
+                  <tr key={account.id}>
+                    <td className="px-5 py-4"><p className="font-medium text-brand-navy">{account.full_name || account.email}</p><p className="mt-1 text-xs text-muted-text">{account.email}</p></td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-2">
+                        <select aria-label={`Role for ${account.email}`} value={roleByUser[account.id] ?? account.role} disabled={isSelf || isUpdating} onChange={(event) => setRoleByUser((current) => ({ ...current, [account.id]: event.target.value as UserRole }))} className="rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-body-text outline-none focus:border-brand-blue disabled:opacity-60">
+                          <option value="client">Client</option><option value="operator">Operator</option><option value="admin">Admin</option>
+                        </select>
+                        {!isSelf && (roleByUser[account.id] ?? account.role) !== account.role ? <button type="button" disabled={isUpdating} onClick={() => void saveRole(account)} className="cursor-pointer rounded-md border border-brand-blue px-2.5 py-2 text-xs font-medium text-brand-blue hover:bg-brand-soft-blue disabled:opacity-60">Save</button> : null}
+                      </div>
+                    </td>
+                    <td className="px-5 py-4"><span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${account.is_active ? "border-status-good/25 bg-status-good/5 text-status-good" : "border-border bg-page-background text-muted-text"}`}>{account.is_active ? "Active" : "Inactive"}</span></td>
+                    <td className="px-5 py-4 text-right">
+                      <button type="button" disabled={isSelf || isUpdating} onClick={() => setConfirmingUser(account)} className={`cursor-pointer rounded-md border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${account.is_active ? "border-status-bad/25 text-status-bad hover:bg-status-bad/5" : "border-border text-body-text hover:bg-page-background"}`}>
+                        {account.is_active ? "Deactivate" : "Reactivate"}
+                      </button>
+                      {isSelf ? <span className="ml-2 text-xs text-muted-text">Current user</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {isLoading ? <TableSkeleton columns={4} /> : null}
+          {!isLoading && users.length === 0 ? <EmptyMessage icon={<Users size={24} />} title="No users found" detail="Create the first workspace account to get started." /> : null}
+        </div>
       </Card>
+      <Dialog
+        open={createDialogOpen}
+        title="Create workspace user"
+        description="New accounts receive the selected role and can sign in immediately."
+        onClose={() => setCreateDialogOpen(false)}
+        footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setCreateDialogOpen(false)} className="min-h-10 rounded-lg border border-border px-4 py-2 text-sm font-medium text-body-text hover:bg-page-background">Cancel</button><button form="create-workspace-user" type="submit" disabled={isCreating} className="min-h-10 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:opacity-60">{isCreating ? "Creating…" : "Create user"}</button></div>}
+      >
+        <form id="create-workspace-user" onSubmit={(event) => void createUser(event)} className="space-y-4">
+          <label className="block text-sm font-medium text-brand-navy">Full name <span className="font-normal text-muted-text">(optional)</span><input name="full-name" maxLength={255} className="mt-1.5 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm font-normal outline-none focus:border-brand-blue" /></label>
+          <label className="block text-sm font-medium text-brand-navy">Email<input name="email" type="email" required autoComplete="email" className="mt-1.5 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm font-normal outline-none focus:border-brand-blue" /></label>
+          <label className="block text-sm font-medium text-brand-navy">Temporary password<input name="password" type="password" required minLength={12} maxLength={72} autoComplete="new-password" className="mt-1.5 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm font-normal outline-none focus:border-brand-blue" /><span className="mt-1 block text-xs font-normal text-muted-text">Use at least 12 characters. Share it securely and ask the user to replace it.</span></label>
+          <label className="block text-sm font-medium text-brand-navy">Role<select name="role" defaultValue="client" className="mt-1.5 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm font-normal outline-none focus:border-brand-blue"><option value="client">Client</option><option value="operator">Operator</option><option value="admin">Admin</option></select></label>
+        </form>
+      </Dialog>
+      <ConfirmationModal
+        open={confirmingUser !== null}
+        title={confirmingUser?.is_active ? "Deactivate this account?" : "Reactivate this account?"}
+        description={confirmingUser?.is_active ? `${confirmingUser.email} will no longer be able to sign in.` : `${confirmingUser?.email} will be able to sign in again.`}
+        confirmLabel={confirmingUser?.is_active ? "Deactivate" : "Reactivate"}
+        onConfirm={() => void toggleActive()}
+        onCancel={() => setConfirmingUser(null)}
+        isDestructive={confirmingUser?.is_active}
+        isPending={isUpdating}
+      />
     </div>
   );
 }
@@ -761,8 +1083,41 @@ function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: 
   return <section><p className="text-sm font-medium capitalize text-brand-blue">{eyebrow}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-brand-navy sm:text-3xl">{title}</h1><p className="mt-2 text-sm text-muted-text">{description}</p></section>;
 }
 
-function LoadingMessage({ children }: { children: string }) {
-  return <p className="px-5 py-10 text-center text-sm text-muted-text">{children}</p>;
+function TableSkeleton({ columns }: { columns: number }) {
+  return (
+    <motion.div
+      aria-label="Loading table"
+      role="status"
+      className="space-y-3 px-5 py-5"
+      animate={{ opacity: [0.45, 0.85, 0.45] }}
+      transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+    >
+      {Array.from({ length: 5 }, (_, row) => (
+        <div key={row} className="flex gap-3">
+          {Array.from({ length: columns }, (_, column) => (
+            <span key={column} className="h-8 flex-1 rounded-md bg-page-background" />
+          ))}
+        </div>
+      ))}
+      <span className="sr-only">Loading records…</span>
+    </motion.div>
+  );
+}
+
+function AnalyticsSkeleton() {
+  return (
+    <motion.div
+      aria-label="Loading analytics"
+      role="status"
+      className="grid gap-5 xl:grid-cols-[1.45fr_1fr]"
+      animate={{ opacity: [0.45, 0.85, 0.45] }}
+      transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+    >
+      <div className="h-72 rounded-xl border border-border bg-surface p-6"><div className="h-4 w-40 rounded bg-page-background" /><div className="mt-8 h-44 rounded-lg bg-page-background" /></div>
+      <div className="h-72 rounded-xl border border-border bg-surface p-6"><div className="h-4 w-32 rounded bg-page-background" /><div className="mx-auto mt-8 h-44 w-44 rounded-full border-[22px] border-page-background" /></div>
+      <span className="sr-only">Loading analytics…</span>
+    </motion.div>
+  );
 }
 
 function EmptyMessage({ icon, title, detail }: { icon: ReactNode; title: string; detail: string }) {

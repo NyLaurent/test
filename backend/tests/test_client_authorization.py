@@ -49,7 +49,6 @@ def test_client_request_endpoints_require_a_token(client, db_session) -> None:
         ("patch", f"/api/requests/{request.id}/status", {"status": "accepted"}),
         ("get", f"/api/requests/{request.id}/episodes"),
         ("post", f"/api/requests/{request.id}/episodes", {"episode_id": 1}),
-        ("post", "/api/episodes/import?csv_text=empty"),
         ("get", "/api/auth/me"),
         ("get", "/api/episodes"),
         ("get", "/api/analytics"),
@@ -57,6 +56,12 @@ def test_client_request_endpoints_require_a_token(client, db_session) -> None:
     for method, path, *body in protected_calls:
         response = getattr(client, method)(path, json=body[0]) if body else getattr(client, method)(path)
         assert response.status_code == status.HTTP_401_UNAUTHORIZED, (method, path, response.text)
+    import_response = client.post(
+        "/api/episodes/import",
+        content="episode_id,robot_id,task_name,recorded_at,duration_seconds,operator_name,quality\n",
+        headers={"Content-Type": "text/csv"},
+    )
+    assert import_response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 def test_client_can_only_read_and_mutate_their_own_requests(client, db_session) -> None:
@@ -174,7 +179,11 @@ def test_client_cannot_access_operations_only_endpoints(client, db_session) -> N
 
     assert client.get("/api/episodes", headers=headers).status_code == status.HTTP_403_FORBIDDEN
     assert client.get("/api/analytics", headers=headers).status_code == status.HTTP_403_FORBIDDEN
-    assert client.post("/api/episodes/import?csv_text=empty", headers=headers).status_code == status.HTTP_403_FORBIDDEN
+    assert client.post(
+        "/api/episodes/import",
+        content="episode_id,robot_id,task_name,recorded_at,duration_seconds,operator_name,quality\n",
+        headers={"Content-Type": "text/csv", **headers},
+    ).status_code == status.HTTP_403_FORBIDDEN
 
 
 def test_client_cannot_assign_episodes_or_change_operator_owned_status(client, db_session) -> None:

@@ -86,3 +86,19 @@ def test_me_rejects_a_signed_token_with_invalid_subject(client) -> None:
     )
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_me_distinguishes_expired_and_malformed_tokens(client) -> None:
+    expired = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {create_access_token('1', expires_minutes=-1)}"},
+    )
+    malformed = client.get(
+        "/api/auth/me",
+        headers={"Authorization": "Bearer not-a-jwt"},
+    )
+
+    assert expired.status_code == status.HTTP_401_UNAUTHORIZED
+    assert expired.json()["detail"] == "Session expired. Please sign in again."
+    assert malformed.status_code == status.HTTP_401_UNAUTHORIZED
+    assert malformed.json()["detail"] == "Invalid access token. Please sign in again."

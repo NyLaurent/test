@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import ExpiredSignatureError, InvalidTokenError
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
@@ -23,18 +24,36 @@ def get_current_user(
 
     try:
         payload = decode_access_token(credentials.credentials)
-    except Exception as exc:  # pragma: no cover - defensive failure path
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    except ExpiredSignatureError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid access token. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 
     user_id = payload.get("sub")
     try:
         parsed_user_id = int(user_id)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid access token. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     user = db.get(User, parsed_user_id)
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User is inactive",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     request.state.user_id = user.id
     return user

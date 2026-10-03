@@ -12,14 +12,14 @@ import {
 import { getCurrentUser, loginUser } from "@/lib/api";
 import type { LoginPayload, User } from "@/lib/types";
 import { useToast } from "@/components/toast/toast-provider";
+import { ApiRequestError, AUTH_EXPIRED_EVENT, AUTH_TOKEN_STORAGE_KEY } from "@/lib/api";
 
-const TOKEN_STORAGE_KEY = "dataset-request-desk-token";
 
 type AuthContextValue = {
   user: User | null;
   token: string | null;
   isLoading: boolean;
-  login: (credentials: LoginPayload) => Promise<void>;
+  login: (credentials: LoginPayload) => Promise<User>;
   logout: () => void;
 };
 
@@ -32,7 +32,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedToken = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    function handleExpiredSession(event: Event) {
+      setToken(null);
+      setUser(null);
+      setIsLoading(false);
+      const message = event instanceof CustomEvent && typeof event.detail === "string"
+        ? event.detail
+        : "Your sign-in token was rejected or expired. Please sign in again.";
+      showToast({
+        kind: "error",
+        title: "Session is no longer valid",
+        description: message,
+      });
+    }
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpiredSession);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpiredSession);
+  }, [showToast]);
+
+  useEffect(() => {
+    const savedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
     if (!savedToken) {
       queueMicrotask(() => setIsLoading(false));
       return;
@@ -46,8 +65,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(currentUser);
         }
       })
-      .catch(() => {
-        window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+      .catch((cause: unknown) => {
+        if (!(cause instanceof ApiRequestError && cause.status === 401)) {
+          showToast({
+            kind: "error",
+            title: "Could not verify your session",
+            description: "The API is temporarily unavailable. Your saved sign-in was kept; reload after reconnecting.",
+          });
+        }
       })
       .finally(() => {
         if (isActive) setIsLoading(false);
@@ -56,12 +81,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [showToast]);
+
+  useEffect(() => {
+    if (user) return;
+
+    async function retrySavedSession() {
+      const savedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+      if (!savedToken) return;
+      setIsLoading(true);
+      try {
+        const currentUser = await getCurrentUser(savedToken);
+        setToken(savedToken);
+        setUser(currentUser);
+      } catch (cause: unknown) {
+        if (!(cause instanceof ApiRequestError && cause.status === 401)) {
+          showToast({
+            kind: "error",
+            title: "Could not reconnect",
+            description: "Your saved sign-in is still available. Retry when the API is reachable.",
+          });
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    window.addEventListener("online", retrySavedSession);
+    window.addEventListener("focus", retrySavedSession);
+    return () => {
+      window.removeEventListener("online", retrySavedSession);
+      window.removeEventListener("focus", retrySavedSession);
+    };
+  }, [showToast, user]);
 
   const login = useCallback(async (credentials: LoginPayload) => {
     const result = await loginUser(credentials);
     const currentUser = await getCurrentUser(result.access_token);
-    window.localStorage.setItem(TOKEN_STORAGE_KEY, result.access_token);
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, result.access_token);
     setToken(result.access_token);
     setUser(currentUser);
     showToast({
@@ -69,10 +126,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       title: "Signed in successfully",
       description: `Welcome back${currentUser.full_name ? `, ${currentUser.full_name}` : ""}.`,
     });
+    return currentUser;
   }, [showToast]);
 
   const logout = useCallback(() => {
-    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     setToken(null);
     setUser(null);
     showToast({

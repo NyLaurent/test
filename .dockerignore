@@ -4,3 +4,5 @@ __pycache__
 .pytest_cache
 .env
 *.py[cod]
+frontend/node_modules
+frontend/.next

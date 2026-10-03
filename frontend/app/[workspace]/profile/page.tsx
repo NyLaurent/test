@@ -1,5 +1,5 @@
 import { PortalRoutePage } from "@/components/portal/portal-pages";
 
-export default function ProfilePage() {
+export default function WorkspaceProfilePage() {
   return <PortalRoutePage section="profile" />;
 }

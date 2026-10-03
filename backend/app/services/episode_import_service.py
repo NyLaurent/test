@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone
 from io import StringIO
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.episode import Episode, EpisodeQuality
@@ -25,7 +27,8 @@ class EpisodeImportService:
     def normalize_row(row: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}
         for key, value in row.items():
-            normalized[key] = (value or "").strip()
+            if isinstance(key, str):
+                normalized[key] = value.strip() if isinstance(value, str) else ""
         normalized["robot_id"] = normalized.get("robot_id", "").strip().lower()
         normalized["task_name"] = normalized.get("task_name", "").strip()
         normalized["quality"] = normalized.get("quality", "").strip().lower()
@@ -36,7 +39,28 @@ class EpisodeImportService:
     def parse_duration(value: str) -> int:
         if not value:
             raise ValueError("missing duration_seconds")
-        return int(float(value))
+        try:
+            duration = float(value)
+        except ValueError as exc:
+            raise ValueError("duration_seconds must be numeric") from exc
+        if not duration.is_integer() or duration < 0:
+            raise ValueError("duration_seconds must be a non-negative whole number")
+        return int(duration)
+
+    @staticmethod
+    def parse_recorded_at(value: str) -> datetime:
+        if not value:
+            raise ValueError("missing recorded_at")
+        normalized = value.strip()
+        if normalized.endswith(("Z", "z")):
+            normalized = f"{normalized[:-1]}+00:00"
+        try:
+            recorded_at = datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError(f"invalid recorded_at: {value}") from exc
+        if recorded_at.tzinfo is None:
+            recorded_at = recorded_at.replace(tzinfo=timezone.utc)
+        return recorded_at
 
     @staticmethod
     def import_csv(db: Session, csv_text: str) -> ImportSummary:
@@ -45,20 +69,27 @@ class EpisodeImportService:
         if reader.fieldnames is None:
             raise ValueError("CSV file is missing a header row")
 
-        missing_fields = REQUIRED_FIELDS - set(field.strip() for field in reader.fieldnames)
+        reader.fieldnames = [
+            (field or "").strip().lstrip("\ufeff").lower()
+            for field in reader.fieldnames
+        ]
+        missing_fields = REQUIRED_FIELDS - set(reader.fieldnames)
         if missing_fields:
             raise ValueError(f"CSV headers missing required columns: {sorted(missing_fields)}")
 
         seen_ids: set[str] = set()
         for line_number, raw_row in enumerate(reader, start=2):
             summary.total_rows += 1
+            if None in raw_row:
+                summary.skipped_count += 1
+                summary.reasons.append(f"line {line_number}: too many columns")
+                continue
             row = EpisodeImportService.normalize_row(raw_row)
             try:
                 if not row.get("episode_id"):
                     raise ValueError("missing episode_id")
                 if row["episode_id"] in seen_ids:
                     raise ValueError("duplicate episode_id in file")
-                seen_ids.add(row["episode_id"])
 
                 if not row.get("robot_id"):
                     raise ValueError("missing robot_id")
@@ -73,23 +104,31 @@ class EpisodeImportService:
                 if existing is not None:
                     raise ValueError("already exists")
 
-                duration_minutes = EpisodeImportService.parse_duration(row["duration_seconds"])
+                duration_seconds = EpisodeImportService.parse_duration(row["duration_seconds"])
+                recorded_at = EpisodeImportService.parse_recorded_at(row["recorded_at"])
                 episode = Episode(
                     episode_id=row["episode_id"],
                     robot_id=row["robot_id"],
                     task_name=row["task_name"],
-                    recorded_at=row["recorded_at"],
-                    duration_seconds=duration_minutes,
+                    recorded_at=recorded_at,
+                    duration_seconds=duration_seconds,
                     operator_name=row["operator_name"],
                     quality=row["quality"],
                 )
-                db.add(episode)
-                db.flush()
+                with db.begin_nested():
+                    db.add(episode)
+                    db.flush()
                 summary.imported_count += 1
-            except Exception as exc:
+                seen_ids.add(row["episode_id"])
+            except (ValueError, TypeError, OverflowError, IntegrityError) as exc:
                 summary.skipped_count += 1
-                summary.reasons.append(f"line {line_number}: {exc}")
+                message = "already exists" if isinstance(exc, IntegrityError) else str(exc)
+                summary.reasons.append(f"line {line_number}: {message}")
                 continue
 
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         return summary

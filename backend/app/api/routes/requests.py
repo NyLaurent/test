@@ -104,7 +104,13 @@ def delete_client_request(
 def update_request_status(
     request_id: int,
     payload: RequestStatusUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_roles(
+            UserRole.client.value,
+            UserRole.operator.value,
+            UserRole.admin.value,
+        )
+    ),
     db: Session = Depends(get_db),
 ) -> DatasetRequest:
     try:

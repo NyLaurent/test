@@ -16,6 +16,7 @@ import {
   Menu,
   X,
   UserRound,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
@@ -27,25 +28,32 @@ type PortalSection = {
 };
 
 const clientSections: PortalSection[] = [
-  { label: "Overview", href: "/portal", icon: LayoutDashboard },
-  { label: "My requests", href: "/portal/requests", icon: ClipboardList },
-  { label: "Profile", href: "/portal/profile", icon: UserRound },
+  { label: "Overview", href: "", icon: LayoutDashboard },
+  { label: "My requests", href: "/requests", icon: ClipboardList },
+  { label: "Profile", href: "/profile", icon: UserRound },
 ];
 
 const operationsSections: PortalSection[] = [
-  { label: "Overview", href: "/portal", icon: LayoutDashboard },
-  { label: "Request queue", href: "/portal/requests", icon: ClipboardList },
-  { label: "Episode inventory", href: "/portal/episodes", icon: Database },
-  { label: "Analytics", href: "/portal/analytics", icon: ChartNoAxesCombined },
+  { label: "Overview", href: "", icon: LayoutDashboard },
+  { label: "Request queue", href: "/requests", icon: ClipboardList },
+  { label: "Episode inventory", href: "/episodes", icon: Database },
+  { label: "Analytics", href: "/analytics", icon: ChartNoAxesCombined },
+  { label: "Profile", href: "/profile", icon: UserRound },
+];
+
+const adminSections: PortalSection[] = [
+  ...operationsSections,
+  { label: "User management", href: "/users", icon: Users },
 ];
 
 const routeTitles: Record<string, string> = {
-  "/portal": "Overview",
-  "/portal/requests": "Requests",
-  "/portal/requests/new": "New request",
-  "/portal/episodes": "Episode inventory",
-  "/portal/analytics": "Analytics",
-  "/portal/profile": "Profile",
+  "/": "Overview",
+  "/requests": "Requests",
+  "/requests/new": "New request",
+  "/episodes": "Episode inventory",
+  "/analytics": "Analytics",
+  "/profile": "Profile",
+  "/users": "User management",
 };
 
 export function PortalShell({ children }: { children: ReactNode }) {
@@ -87,10 +95,16 @@ export function PortalShell({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   const isClient = user.role === "client";
-  const sections = isClient ? clientSections : operationsSections;
+  const workspaceBase = `/${user.role}`;
+  const sectionItems = isClient ? clientSections : user.role === "admin" ? adminSections : operationsSections;
+  const sections = sectionItems.map((section) => ({
+    ...section,
+    href: `${workspaceBase}${section.href}`,
+  }));
   const roleLabel = isClient ? "Client portal" : user.role === "admin" ? "Admin portal" : "Operator portal";
   const displayName = user.full_name || user.email;
-  const pageTitle = routeTitles[pathname] ?? "Workspace";
+  const pagePath = pathname.slice(workspaceBase.length) || "/";
+  const pageTitle = routeTitles[pagePath] ?? "Workspace";
 
   function requestLogout() {
     setProfileOpenAtPath(null);
@@ -153,7 +167,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
 
         <div className="border-t border-border p-4">
           <Link
-            href="/portal/profile"
+            href={`${workspaceBase}/profile`}
             className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-page-background"
           >
             <UserAvatar name={displayName} />
@@ -225,7 +239,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
                       <p className="mt-2 text-[11px] font-medium capitalize tracking-wide text-muted-text">{user.role}</p>
                     </div>
                     <Link
-                      href="/portal/profile"
+                      href={`${workspaceBase}/profile`}
                       role="menuitem"
                       onClick={() => setProfileOpenAtPath(null)}
                       className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-body-text hover:bg-page-background"
@@ -302,7 +316,7 @@ export function PortalShell({ children }: { children: ReactNode }) {
               </nav>
               <div className="border-t border-border p-4">
                 <Link
-                  href="/portal/profile"
+                  href={`${workspaceBase}/profile`}
                   onClick={() => setMobileNavOpenAtPath(null)}
                   className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-page-background"
                 >

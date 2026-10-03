@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import DateTime, Enum as SAEnum, Integer, String, func
+from sqlalchemy import DateTime, Enum as SAEnum, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -17,6 +17,10 @@ class EpisodeQuality(str, PyEnum):
 
 class Episode(Base):
     __tablename__ = "episodes"
+    __table_args__ = (
+        Index("ix_episodes_recorded_at_robot_id", "recorded_at", "robot_id"),
+        Index("ix_episodes_quality_recorded_at", "quality", "recorded_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     episode_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)

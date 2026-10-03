@@ -1,7 +1,5 @@
-"use client";
-
 import { PortalRoutePage } from "@/components/portal/portal-pages";
 
-export default function PortalPage() {
+export default function WorkspaceOverviewPage() {
   return <PortalRoutePage section="overview" />;
 }

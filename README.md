@@ -1,26 +1,28 @@
 # Dataset Request Desk
 
-An internal platform for robotics dataset requests and episode fulfilment. The backend is a Python/FastAPI API backed by PostgreSQL; the frontend is a Next.js application.
+An internal platform for robotics dataset requests and episode fulfilment. The backend is a Python/FastAPI API backed by PostgreSQL; the frontend is a Next.js application. PostgreSQL is used by Compose and local backend configuration. Unit tests use an isolated in-memory SQLite database for speed; SQLite is not the application runtime database. Use PostgreSQL for concurrent writes, reliable row locking/constraints, and operational tooling.
 
-## Run locally
+## Run the full application
 
-Start the database and backend from the repository root:
+With Docker Compose installed, start the database, apply migrations, seed development users, and run the API and frontend from the repository root:
 
 ```powershell
 docker compose up --build
 ```
 
-Compose waits for PostgreSQL, applies Alembic migrations, seeds the development accounts, then starts the API at <http://localhost:8000>. API documentation is at <http://localhost:8000/docs>; the health endpoint is <http://localhost:8000/health>.
+Open <http://localhost:3000>. The API is at <http://localhost:8000>, with interactive documentation at <http://localhost:8000/docs> and health status at <http://localhost:8000/health>. To stop, press Ctrl+C; use `docker compose down` to stop and remove the containers. The named PostgreSQL volume remains unless explicitly removed.
 
-In another terminal, start the frontend:
+After signing in, each role uses its own route prefix: `/client`, `/operator`, or `/admin`. The frontend redirects a signed-in user away from another role's workspace, while the API independently enforces authorization on every protected endpoint.
+
+For local frontend development against the Compose API:
 
 ```powershell
 Set-Location frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Open <http://localhost:3000>.
+For local backend development, install Python 3.12+ and the project dependencies with `python -m pip install -e ".[dev]"`, then run `python -m pytest -q` from the repository root. The backend configuration is in `.env.example`; never commit real secrets.
 
 ## Local development users
 
@@ -32,25 +34,38 @@ Open <http://localhost:3000>.
 | Client | `client-a@example.com` | `client123` |
 | Client | `client-b@example.com` | `client123` |
 
-These accounts are for local development only. Do not use the seeded accounts or Compose database credentials outside a local environment.
+These accounts and Compose database credentials are only for local development. Do not use them outside a local environment.
 
-## Authorization
+## Roles and workflow
 
-All API routes require a bearer token except login and the health check. The frontend loads the signed-in user from `/api/auth/me` and sends the token with protected requests. Authorization is enforced by the API, not by UI visibility:
+Every API operation except login and `/health` requires a bearer token. The API enforces role and ownership checks independently of the UI:
 
-- Clients can list, view, create, and manage only their own requests.
-- A client may edit or delete a request only while its status is `submitted`.
-- Clients may accept or reject only their own delivered requests. Assigned episodes are visible to the client only after delivery.
-- Operators and admins can manage the shared request queue, episode inventory, and analytics.
+- Clients can create requests and access only their own requests. They can edit or delete requests only while `submitted`, and can accept/reject their own `delivered` requests. Assigned episodes become visible after delivery.
+- Operators can view the shared request queue, move requests through operator-owned steps, assign eligible episodes, import episode CSVs, and view analytics.
+- Admins can do operator work and manage user roles, activation, and account creation.
 
-Login normalizes and validates email addresses, returns a generic error for invalid credentials, rejects inactive accounts, and issues a signed, expiring JWT. Passwords are stored as bcrypt hashes. Production deployments must set a non-placeholder `JWT_SECRET_KEY` of at least 32 characters. Configure distributed login rate limiting at the deployment edge before exposing the service publicly.
+The workflow permits only `submitted → in_progress → delivered → accepted/rejected`; rejected work can return to `in_progress`. Each transition records its actor and time. Assignment is database-constrained to one request per episode, only good/usable episodes are eligible, and delivery is blocked until the requested count has been assigned.
+
+Episode imports are available to operators and admins from **Episode inventory**. CSV headers are normalized, invalid/duplicate rows are skipped with line-specific reasons, and `episode_id` uniqueness makes repeated imports idempotent. The API accepts raw `text/csv` at `POST /api/episodes/import`.
+
+## Authentication and security
+
+Passwords are stored as bcrypt hashes. JWTs are signed, expire after one hour, and require `sub`, `iat`, and `exp` claims. Configure a non-placeholder `JWT_SECRET_KEY` of at least 32 characters outside development and use HTTPS in production. The frontend clears invalid/expired tokens and asks the user to sign in again. Login rate limiting should be configured at the deployment edge before public exposure.
+
+## Analytics and scale
+
+Analytics are grouped and filtered in SQL: episodes per recording day and robot, request counts by status, median submitted-to-delivered time, and the five most common good-episode task names. At five million episodes, indexed date/quality/task queries and database aggregation avoid loading the full dataset into the API process. Production should verify plans with `EXPLAIN ANALYZE`, maintain indexes for time-range and grouping workloads, and consider date partitioning or pre-aggregated daily metrics if query latency requires it.
 
 ## Tests
 
-Run backend tests from the repository root:
+Run the automated backend suite from the repository root:
 
 ```powershell
-python -m pytest
+python -m pytest -q
 ```
 
-The project targets Python 3.12 or newer. Tests cover login, client authorization and request ownership, request transitions, assignments, analytics, and health behavior.
+Tests cover login/token failures, role authorization, client ownership, admin user management, legal transitions and history, assignment eligibility/uniqueness, CSV import validation/idempotency, analytics date ranges, and health behavior.
+
+## Implementation notes
+
+See [NOTES.md](NOTES.md) for the data model, tradeoffs, known simplifications, security considerations, scale limits, and AI tooling disclosure. No optional stretch item was selected; core workflows and correctness were prioritized.

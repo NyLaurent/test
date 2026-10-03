@@ -31,19 +31,27 @@ def test_analytics_returns_basic_metrics(client, db_session) -> None:
         notes=None,
         status=RequestStatus.submitted.value,
     )
+    request.created_at = datetime(2026, 9, 1, 8, 0, 0)
     db_session.add(request)
     db_session.commit()
     db_session.refresh(request)
 
-    db_session.add(
+    db_session.add_all([
         StatusHistory(
             request_id=request.id,
-            from_status=RequestStatus.submitted.value,
+            from_status=None,
+            to_status=RequestStatus.submitted.value,
+            changed_by=client_user.id,
+            changed_at=datetime(2026, 9, 1, 8, 0, 0),
+        ),
+        StatusHistory(
+            request_id=request.id,
+            from_status=RequestStatus.in_progress.value,
             to_status=RequestStatus.delivered.value,
             changed_by=operator.id,
             changed_at=datetime(2026, 9, 1, 9, 0, 0),
-        )
-    )
+        ),
+    ])
 
     db_session.add(
         Episode(

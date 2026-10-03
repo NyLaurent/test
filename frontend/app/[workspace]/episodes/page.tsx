@@ -1,5 +1,5 @@
 import { PortalRoutePage } from "@/components/portal/portal-pages";
 
-export default function EpisodesPage() {
+export default function WorkspaceEpisodesPage() {
   return <PortalRoutePage section="episodes" />;
 }
