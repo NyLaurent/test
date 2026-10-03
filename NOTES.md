@@ -9,18 +9,20 @@ The workflow is deliberately narrow: operators/admins move `submitted → in_pro
 ## Hard decisions
 
 - **Date-range meaning:** episode metrics use `recorded_at`; request counts and delivery duration use the request submission time (`created_at`). This keeps the date range anchored to when the item entered the corresponding process and gives delivery duration one consistent start.
-- **Episode import behavior:** malformed and duplicate rows do not fail the whole CSV. Each rejected row has a line number and reason so an operator can correct the source and retry safely. `episode_id` is the stable idempotency key.
+- **Episode import behavior:** malformed and duplicate rows do not fail the whole CSV. Each rejected row has a line number and reason so an operator can correct the source and retry safely. `episode_id` is canonicalized to uppercase as the stable idempotency key. The operator inventory previews and imports the bundled seed directly, and can invoke the supplied clean-data generator for small volume checks.
 - **Database choice:** Compose and local backend defaults use PostgreSQL for its constraints and concurrent-write behavior. SQLite is used only by isolated in-memory test fixtures and a migration compatibility check; it is not the application runtime database. Production also needs backups, monitoring, migration rollout controls, and possibly row-level locking around high-contention assignment/admin operations.
 
 ## What is simplified / next
 
-The request queue is intentionally basic and does not yet paginate. The inventory page is paginated, while the operator overview and assignment chooser still load the available episode list in one request; imports also read the uploaded CSV into memory and report all skipped rows in one response. There is no export-job pipeline, real-time update channel, client notification delivery, password reset, or public deployment. With two more days, I would add paginated/filterable queue queries, a paginated assignment chooser, a streaming or background CSV import for large files, rate limiting, and end-to-end browser tests. No optional stretch item was selected.
+The request queue is intentionally basic and does not yet paginate. The inventory page is paginated, while the operator overview and assignment chooser still load the available episode list in one request; imports also read the CSV into memory and report skipped rows in one response. The browser generator is capped at 20,000 rows per action; larger load-test files remain a command-line use of the supplied script. There is no export-job pipeline, real-time update channel, client notification delivery, password reset, or public deployment. With two more days, I would add paginated/filterable queue queries, a paginated assignment chooser, a streaming or background CSV import for large files, rate limiting, and end-to-end browser tests. No optional stretch item was selected.
 
 ## Failure and diagnosis
 
 SQLite does not preserve timezone metadata when it reloads a timezone-aware `DateTime`. An early import assertion therefore passed immediately after parsing but failed after reading the row back. I separated parsing correctness from backend persistence in the test: parsed ISO timestamps are normalized to UTC, while the SQLite round-trip is asserted as the equivalent naive UTC wall time. The assignment migration uses Alembic batch operations so SQLite can rebuild the table while PostgreSQL can apply the equivalent constraints.
 
 During frontend session debugging, login and refresh succeeded while protected API calls returned 401. Inspecting the outgoing request revealed that the shared API helper was sending a placeholder instead of the bearer token. I corrected the header and confirmed the helper now builds `Authorization: Bearer <access token>`.
+
+The test container's wall clock also jumped between requests during one suite run, making otherwise valid 15-minute tokens appear expired in multi-request authorization tests. I confirmed this from the signed `iat`/`exp` claims and stabilized only the authorization-test helper's time claims; the dedicated auth tests still exercise real login, expiration, and refresh behavior.
 
 ## Security
 

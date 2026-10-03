@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from auth_helpers import stable_access_token
+
 from app.models.dataset_request import DatasetRequest, RequestStatus
 from app.models.episode import Episode, EpisodeQuality
 from app.models.status_history import StatusHistory
@@ -81,6 +83,7 @@ def test_analytics_returns_basic_metrics(client, db_session) -> None:
         "/api/auth/login",
         json={"email": "operator@example.com", "password": "StrongPass123!"},
     ).json()["access_token"]
+    token = stable_access_token(token)
 
     response = client.get(
         "/api/analytics?start_date=2026-09-01&end_date=2026-09-03",

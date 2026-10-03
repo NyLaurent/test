@@ -11,6 +11,7 @@ import {
   Building2,
   CheckCheck,
   Clock3,
+  Database,
   Eye,
   FilePlus2,
   Files,
@@ -21,6 +22,7 @@ import {
   Trash2,
   Timer,
   Users,
+  WandSparkles,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import {
@@ -43,11 +45,14 @@ import {
   getAnalytics,
   getAdminUsers,
   getEpisodePage,
+  getEpisodeSeedPreview,
   getEpisodes,
   getRequestEpisodes,
   getRequestHistory,
   getRequests,
   importEpisodes,
+  importSeedEpisodes,
+  generateAndImportEpisodes,
   updateAdminUser,
   updateRequestStatus,
 } from "@/lib/api";
@@ -55,6 +60,7 @@ import type {
   AnalyticsResponse,
   Episode,
   EpisodeImportSummary,
+  EpisodeSeedRow,
   RequestRecord,
   RequestStatus,
   StatusHistoryEntry,
@@ -1060,6 +1066,13 @@ function EpisodesPage() {
   const [pageSize, setPageSize] = useState(10);
   const [isImporting, setIsImporting] = useState(false);
   const [importSummary, setImportSummary] = useState<EpisodeImportSummary | null>(null);
+  const [seedRows, setSeedRows] = useState<EpisodeSeedRow[]>([]);
+  const [seedRowCount, setSeedRowCount] = useState(0);
+  const [seedPage, setSeedPage] = useState(0);
+  const [seedPreviewError, setSeedPreviewError] = useState<string | null>(null);
+  const [isSeedPreviewLoading, setIsSeedPreviewLoading] = useState(true);
+  const [generatedCount, setGeneratedCount] = useState(1000);
+  const [isGenerating, setIsGenerating] = useState(false);
   const requestSequence = useRef(0);
 
   const loadEpisodes = useCallback(async () => {
@@ -1092,6 +1105,86 @@ function EpisodesPage() {
     return () => window.clearTimeout(timeout);
   }, [loadEpisodes]);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    setIsSeedPreviewLoading(true);
+    getEpisodeSeedPreview(token, { limit: 10, offset: seedPage * 10 })
+      .then((result) => {
+        if (cancelled) return;
+        setSeedRows(result.items);
+        setSeedRowCount(result.total);
+        setSeedPreviewError(null);
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setSeedPreviewError(cause instanceof Error ? cause.message : "Could not load the bundled CSV preview.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsSeedPreviewLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [seedPage, token]);
+
+  async function refreshInventoryAfterImport() {
+    if (!token) return;
+    setTaskFilter("");
+    setQualityFilter("");
+    setPageIndex(0);
+    const refreshedPage = await getEpisodePage(token, { limit: pageSize, offset: 0 });
+    setEpisodes(refreshedPage.items);
+    setTotalEpisodes(refreshedPage.total);
+    setLoadError(null);
+  }
+
+  async function presentImportResult(result: EpisodeImportSummary, source: string) {
+    setImportSummary(result);
+    showToast({
+      kind: result.skipped_count ? "info" : "success",
+      title: `${source} import complete`,
+      description: `${result.imported_count} imported; ${result.skipped_count} skipped.`,
+    });
+    try {
+      await refreshInventoryAfterImport();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Please try refreshing the inventory.";
+      setLoadError(message);
+      showToast({ kind: "info", title: "Import saved; inventory could not refresh", description: message });
+    }
+  }
+
+  async function handleSeedImport() {
+    if (!token) return;
+    setIsImporting(true);
+    setImportError(null);
+    setImportSummary(null);
+    try {
+      await presentImportResult(await importSeedEpisodes(token), "Seed CSV");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Please try again.";
+      setImportError(message);
+      showToast({ kind: "error", title: "Seed import failed", description: message });
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function handleGenerateImport() {
+    if (!token) return;
+    setIsGenerating(true);
+    setImportError(null);
+    setImportSummary(null);
+    try {
+      await presentImportResult(await generateAndImportEpisodes(generatedCount, token), "Generated episode");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Please try again.";
+      setImportError(message);
+      showToast({ kind: "error", title: "Episode generation failed", description: message });
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   function updateTaskFilter(value: string) {
     setTaskFilter(value);
     setPageIndex(0);
@@ -1121,29 +1214,7 @@ function EpisodesPage() {
     setIsLoading(true);
     try {
       const result = await importEpisodes(await file.text(), token);
-      setImportSummary(result);
-      setTaskFilter("");
-      setQualityFilter("");
-      setPageIndex(0);
-      showToast({
-        kind: "success",
-        title: "Episode import complete",
-        description: `${result.imported_count} imported; ${result.skipped_count} skipped.`,
-      });
-      try {
-        const refreshedPage = await getEpisodePage(token, { limit: pageSize, offset: 0 });
-        setEpisodes(refreshedPage.items);
-        setTotalEpisodes(refreshedPage.total);
-        setLoadError(null);
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : "Please try refreshing the inventory.";
-        setLoadError(message);
-        showToast({
-          kind: "info",
-          title: "Import saved; inventory could not refresh",
-          description: message,
-        });
-      }
+      await presentImportResult(result, "Episode CSV");
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Please try again.";
       setImportError(message);
@@ -1161,14 +1232,71 @@ function EpisodesPage() {
   return (
     <div className="space-y-6">
       <PageHeading eyebrow="Operations workspace" title="Episode inventory" description="Browse recently recorded episodes and their quality." />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,1fr)]">
+        <Card className="overflow-hidden">
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>Bundled seed CSV</CardTitle>
+              <CardDescription>Preview {seedRowCount.toLocaleString()} rows from seed/episodes.csv, then import them directly into the inventory.</CardDescription>
+            </div>
+            <button type="button" onClick={() => void handleSeedImport()} disabled={isImporting || isGenerating || isSeedPreviewLoading} className="inline-flex min-h-10 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
+              <Database aria-hidden="true" size={16} />
+              {isImporting ? "Importing seed…" : "Import seed CSV"}
+            </button>
+          </CardHeader>
+          <div className="overflow-x-auto border-t border-border">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead className="bg-page-background uppercase tracking-wide text-muted-text"><tr><th className="px-4 py-3">Line</th><th className="px-4 py-3">Episode</th><th className="px-4 py-3">Robot</th><th className="px-4 py-3">Task</th><th className="px-4 py-3">Recorded at</th><th className="px-4 py-3">Duration</th><th className="px-4 py-3">Operator</th><th className="px-4 py-3">Quality</th></tr></thead>
+              <tbody className="divide-y divide-border">
+                {seedRows.map((row) => <tr key={row.line_number} className="hover:bg-page-background/70">
+                  <td className="px-4 py-3 text-muted-text">{row.line_number}</td>
+                  <td className="px-4 py-3 font-medium text-brand-navy">{row.episode_id || <span className="text-status-warning">Missing</span>}</td>
+                  <td className="px-4 py-3 text-body-text">{row.robot_id || <span className="text-status-warning">Missing</span>}</td>
+                  <td className="max-w-44 truncate px-4 py-3 text-body-text" title={row.task_name ?? undefined}>{row.task_name || <span className="text-status-warning">Missing</span>}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-body-text">{row.recorded_at || <span className="text-status-warning">Missing</span>}</td>
+                  <td className="px-4 py-3 text-body-text">{row.duration_seconds || <span className="text-status-warning">Missing</span>}</td>
+                  <td className="px-4 py-3 text-body-text">{row.operator_name || <span className="text-status-warning">Missing</span>}</td>
+                  <td className="px-4 py-3 text-body-text">{row.quality || <span className="text-status-warning">Missing</span>}</td>
+                </tr>)}
+                {!isSeedPreviewLoading && seedRows.length === 0 ? <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-text">No seed rows to preview.</td></tr> : null}
+              </tbody>
+            </table>
+            {isSeedPreviewLoading ? <div className="px-4 py-6 text-sm text-muted-text">Loading seed preview…</div> : null}
+            {seedPreviewError ? <div role="alert" className="px-4 py-4 text-sm text-status-bad">Could not load the bundled CSV: {seedPreviewError}</div> : null}
+          </div>
+          <div className="flex items-center justify-between border-t border-border px-4 py-3">
+            <p className="text-xs text-muted-text">Showing {seedRowCount ? seedPage * 10 + 1 : 0}–{Math.min((seedPage + 1) * 10, seedRowCount)} of {seedRowCount.toLocaleString()} seed rows</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={seedPage === 0 || isSeedPreviewLoading} onClick={() => setSeedPage((page) => Math.max(0, page - 1))} className="min-h-8 cursor-pointer rounded-md border border-border px-3 text-xs font-medium text-body-text disabled:cursor-not-allowed disabled:opacity-50">Previous</button>
+              <button type="button" disabled={(seedPage + 1) * 10 >= seedRowCount || isSeedPreviewLoading} onClick={() => setSeedPage((page) => page + 1)} className="min-h-8 cursor-pointer rounded-md border border-border px-3 text-xs font-medium text-body-text disabled:cursor-not-allowed disabled:opacity-50">Next</button>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Generate test episodes</CardTitle>
+            <CardDescription>Run the bundled seed/generate_episodes.py generator and import its clean output. Repeated IDs are skipped safely.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <label className="block text-sm font-medium text-brand-navy" htmlFor="generated-episode-count">Number of episodes</label>
+            <input id="generated-episode-count" type="number" min={1} max={20000} step={100} value={generatedCount} onChange={(event) => setGeneratedCount(Number(event.target.value))} className="mt-2 min-h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-brand-navy outline-none focus:border-brand-blue" />
+            <p className="mt-2 text-xs text-muted-text">Choose 1–20,000 rows. Larger batches can be created with the generator script from the command line.</p>
+            <button type="button" onClick={() => void handleGenerateImport()} disabled={isImporting || isGenerating || generatedCount < 1 || generatedCount > 20000} className="mt-4 inline-flex min-h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-brand-blue px-4 py-2 text-sm font-semibold text-brand-blue hover:bg-brand-soft-blue disabled:cursor-not-allowed disabled:opacity-50">
+              <WandSparkles aria-hidden="true" size={16} />
+              {isGenerating ? "Generating and importing…" : "Generate and import"}
+            </button>
+          </CardContent>
+        </Card>
+      </div>
       <Card>
-        <CardHeader><CardTitle>Import episode CSV</CardTitle><CardDescription>Upload a recording-system export. Re-imports are safe; duplicate and invalid rows are reported.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Import another CSV</CardTitle><CardDescription>Upload a different recording-system export. Re-imports are safe; duplicate and invalid rows are reported.</CardDescription></CardHeader>
         <CardContent>
           <form onSubmit={(event) => void handleImport(event)} className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="min-w-0 flex-1 text-sm font-medium text-brand-navy">CSV file
               <input name="episode-csv" type="file" accept=".csv,text/csv" className="mt-2 block w-full cursor-pointer rounded-lg border border-border bg-surface px-3 py-2 text-sm text-body-text file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-brand-soft-blue file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-blue" />
             </label>
-            <button type="submit" disabled={isImporting} className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
+            <button type="submit" disabled={isImporting || isGenerating} className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
               {isImporting ? (
                 <motion.span aria-hidden="true" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                   <Activity size={16} />
@@ -1187,7 +1315,7 @@ function EpisodesPage() {
               Import failed: {importError}
             </motion.div>
           ) : null}
-          {importSummary ? (
+              {importSummary ? (
             <motion.section
               aria-live="polite"
               initial={{ opacity: 0, y: 12 }}
@@ -1206,6 +1334,25 @@ function EpisodesPage() {
                   <ImportCount label="Skipped" value={importSummary.skipped_count} tone={importSummary.skipped_count ? "warning" : "good"} />
                 </div>
               </div>
+              {importSummary.imported_rows.length ? (
+                <div className="mt-4 overflow-hidden rounded-lg border border-border bg-surface">
+                  <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <p className="text-sm font-medium text-brand-navy">Imported episode IDs</p>
+                    <span className="rounded-full bg-status-good/10 px-2.5 py-1 text-xs font-medium text-status-good">{importSummary.imported_count}</span>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    <ul className="grid gap-x-4 divide-y divide-border sm:grid-cols-2 sm:divide-y-0">
+                      {importSummary.imported_rows.slice(0, 100).map((row) => (
+                        <li key={`${row.line_number}-${row.episode_id}`} className="flex items-center justify-between gap-3 px-4 py-2 text-xs">
+                          <span className="text-muted-text">CSV line {row.line_number}</span>
+                          <span className="font-medium text-brand-navy">{row.episode_id}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {importSummary.imported_rows.length > 100 ? <p className="border-t border-border px-4 py-2 text-xs text-muted-text">Showing the first 100 imported IDs; {importSummary.imported_count.toLocaleString()} rows were imported in total.</p> : null}
+                </div>
+              ) : null}
               {importSummary.skipped_rows.length ? (
                 <div className="mt-4 overflow-hidden rounded-lg border border-border bg-surface">
                   <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">

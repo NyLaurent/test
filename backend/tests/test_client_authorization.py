@@ -2,6 +2,7 @@ from datetime import datetime
 
 from fastapi import status
 
+from auth_helpers import login_headers
 from app.models.episode import Episode, EpisodeQuality
 from app.models.dataset_request import RequestStatus
 from app.models.status_history import StatusHistory
@@ -21,12 +22,7 @@ def create_client(db_session, email: str):
 
 
 def client_headers(client, email: str) -> dict[str, str]:
-    response = client.post(
-        "/api/auth/login",
-        json={"email": email, "password": "StrongPass123!"},
-    )
-    assert response.status_code == status.HTTP_200_OK
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+    return login_headers(client, email)
 
 
 def test_client_request_endpoints_require_a_token(client, db_session) -> None:

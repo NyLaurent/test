@@ -60,12 +60,36 @@ export interface EpisodeImportIssue {
   reason: string;
 }
 
+export interface EpisodeImportRow {
+  line_number: number;
+  episode_id: string;
+}
+
 export interface EpisodeImportSummary {
   total_rows: number;
   imported_count: number;
+  imported_rows: EpisodeImportRow[];
   skipped_count: number;
   reasons: string[];
   skipped_rows: EpisodeImportIssue[];
+}
+
+export interface EpisodeSeedRow {
+  line_number: number;
+  episode_id: string | null;
+  robot_id: string | null;
+  task_name: string | null;
+  recorded_at: string | null;
+  duration_seconds: string | null;
+  operator_name: string | null;
+  quality: string | null;
+}
+
+export interface EpisodeSeedPreview {
+  items: EpisodeSeedRow[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface LoginPayload {

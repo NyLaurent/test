@@ -4,7 +4,7 @@ import csv
 from datetime import datetime, timezone
 from io import StringIO
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ class ImportSummary:
     def __init__(self) -> None:
         self.total_rows = 0
         self.imported_count = 0
+        self.imported_rows: list[dict[str, int | str]] = []
         self.skipped_count = 0
         self.reasons: list[str] = []
         self.skipped_rows: list[dict[str, int | str]] = []
@@ -39,6 +40,9 @@ class EpisodeImportService:
         normalized["task_name"] = normalized.get("task_name", "").strip()
         normalized["quality"] = normalized.get("quality", "").strip().lower()
         normalized["operator_name"] = normalized.get("operator_name", "").strip()
+        # Episode IDs are identifiers, not display text. Canonical casing keeps
+        # EP-123 and ep-123 from being imported as separate episodes.
+        normalized["episode_id"] = normalized.get("episode_id", "").strip().upper()
         return normalized
 
     @staticmethod
@@ -63,7 +67,17 @@ class EpisodeImportService:
         try:
             recorded_at = datetime.fromisoformat(normalized)
         except ValueError as exc:
-            raise ValueError(f"invalid recorded_at: {value}") from exc
+            # The provided recording-system export also emits day-first dates.
+            # Only accept explicit, unambiguous formats; don't guess whether
+            # values such as 08/09/2026 mean August or September.
+            for date_format in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+                try:
+                    recorded_at = datetime.strptime(normalized, date_format)
+                    break
+                except ValueError:
+                    continue
+            else:
+                raise ValueError(f"invalid recorded_at: {value}") from exc
         if recorded_at.tzinfo is None:
             recorded_at = recorded_at.replace(tzinfo=timezone.utc)
         return recorded_at
@@ -105,7 +119,9 @@ class EpisodeImportService:
                 if row["quality"] not in VALID_QUALITIES:
                     raise ValueError(f"invalid quality: {row['quality']}")
 
-                existing = db.scalar(select(Episode).where(Episode.episode_id == row["episode_id"]))
+                existing = db.scalar(
+                    select(Episode).where(func.upper(Episode.episode_id) == row["episode_id"])
+                )
                 if existing is not None:
                     raise ValueError("already exists")
 
@@ -122,8 +138,11 @@ class EpisodeImportService:
                 )
                 with db.begin_nested():
                     db.add(episode)
-                    db.flush()
+                db.flush()
                 summary.imported_count += 1
+                summary.imported_rows.append(
+                    {"line_number": line_number, "episode_id": row["episode_id"]}
+                )
                 seen_ids.add(row["episode_id"])
             except (ValueError, TypeError, OverflowError, IntegrityError) as exc:
                 message = "already exists" if isinstance(exc, IntegrityError) else str(exc)

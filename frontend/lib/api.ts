@@ -4,6 +4,7 @@ import type {
   Episode,
   EpisodeImportSummary,
   EpisodePage,
+  EpisodeSeedPreview,
   LoginPayload,
   RequestRecord,
   StatusHistoryEntry,
@@ -341,6 +342,28 @@ export async function assignEpisodeToRequest(
     },
     token,
   );
+}
+
+export async function getEpisodeSeedPreview(
+  token: string,
+  filters: { limit?: number; offset?: number } = {},
+): Promise<EpisodeSeedPreview> {
+  const searchParams = new URLSearchParams({
+    limit: String(filters.limit ?? 10),
+    offset: String(filters.offset ?? 0),
+  });
+  return apiFetch<EpisodeSeedPreview>(`/api/episodes/seed-preview?${searchParams.toString()}`, { method: "GET" }, token);
+}
+
+export async function importSeedEpisodes(token: string): Promise<EpisodeImportSummary> {
+  return apiFetch<EpisodeImportSummary>("/api/episodes/import-seed", { method: "POST" }, token);
+}
+
+export async function generateAndImportEpisodes(count: number, token: string): Promise<EpisodeImportSummary> {
+  return apiFetch<EpisodeImportSummary>("/api/episodes/generate", {
+    method: "POST",
+    body: JSON.stringify({ count }),
+  }, token);
 }
 
 export async function assignEpisodesToRequest(

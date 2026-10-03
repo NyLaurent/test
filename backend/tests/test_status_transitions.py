@@ -6,12 +6,15 @@ from app.services.auth_service import AuthService
 from app.services.request_service import RequestService
 
 
+from auth_helpers import stable_access_token
+
+
 def login_token(client, email: str, password: str) -> str:
     response = client.post(
         "/api/auth/login",
         json={"email": email, "password": password},
     )
-    return response.json()["access_token"]
+    return stable_access_token(response.json()["access_token"])
 
 
 def test_client_can_create_request_and_it_starts_submitted(client, db_session) -> None:

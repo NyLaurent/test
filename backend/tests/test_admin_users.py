@@ -1,16 +1,8 @@
 from fastapi import status
 
+from auth_helpers import login_headers
 from app.models.user import UserRole
 from app.services.auth_service import AuthService
-
-
-def login_headers(client, email: str, password: str = "StrongPass123!") -> dict[str, str]:
-    response = client.post(
-        "/api/auth/login",
-        json={"email": email, "password": password},
-    )
-    assert response.status_code == status.HTTP_200_OK
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def test_admin_can_create_update_and_deactivate_users(client, db_session) -> None:

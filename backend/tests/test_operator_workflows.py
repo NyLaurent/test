@@ -2,21 +2,13 @@ from datetime import datetime
 
 from fastapi import status
 
+from auth_helpers import login_headers
 from app.models.episode import Episode, EpisodeQuality
 from app.models.assignment import Assignment
 from app.models.status_history import StatusHistory
 from app.models.user import UserRole
 from app.services.auth_service import AuthService
 from app.services.request_service import RequestService
-
-
-def login_headers(client, email: str, password: str = "StrongPass123!") -> dict[str, str]:
-    response = client.post(
-        "/api/auth/login",
-        json={"email": email, "password": password},
-    )
-    assert response.status_code == status.HTTP_200_OK
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def test_operator_can_view_all_requests_and_filter_episode_inventory(client, db_session) -> None:

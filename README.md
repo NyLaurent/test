@@ -46,7 +46,7 @@ Every API operation except login and `/health` requires a bearer token. The API 
 
 The workflow permits only `submitted → in_progress → delivered → accepted/rejected`; rejected work can return to `in_progress`. Each transition records its actor, time, and optional note; a note is required when a client requests changes. Operators can select and assign multiple eligible episodes in one action. Assignment is database-constrained to one request per episode, only good/usable episodes are eligible, and delivery is blocked until the requested count has been assigned.
 
-Episode imports are available to operators and admins from **Episode inventory**. CSV headers are normalized, invalid/duplicate rows are skipped with line-specific reasons, and `episode_id` uniqueness makes repeated imports idempotent. The UI shows the imported inventory in a server-paginated table with task and quality filters, and lists every skipped CSV line with its reason. The API accepts raw `text/csv` at `POST /api/episodes/import`; filtered pages are available from `GET /api/episodes/page`.
+Episode imports are available to operators and admins from **Episode inventory**. The page previews the bundled `seed/episodes.csv` and can import it directly, without selecting a local file. It also has a generator control that runs the supplied `seed/generate_episodes.py` and imports up to 20,000 generated rows per UI action; the script can still produce larger CSVs from the command line. CSV headers and supported values are normalized, invalid/duplicate rows are skipped with line-specific reasons, and episode IDs are canonicalized to uppercase for repeat-import safety. The UI shows the imported inventory in a server-paginated table with task and quality filters, and lists every skipped CSV line with its reason. For another recording-system export, upload a CSV from the same page or send raw `text/csv` to `POST /api/episodes/import`; filtered pages are available from `GET /api/episodes/page`.
 
 ## Authentication and security
 
@@ -64,7 +64,7 @@ Run the automated backend suite from the repository root:
 python -m pytest -q
 ```
 
-Tests cover login/token failures, role authorization, client ownership, admin user management, legal transitions and history, assignment eligibility/uniqueness, CSV import validation/idempotency, analytics date ranges, and health behavior.
+Tests cover login/token failures, role authorization, client ownership, admin user management, legal transitions and history, assignment eligibility/uniqueness, import validation and idempotency against both synthetic cases and the supplied seed CSV, the seed preview/import and generator endpoints, analytics date ranges, and health behavior.
 
 ## Implementation notes
 
