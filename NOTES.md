@@ -30,7 +30,7 @@
 
 ## 6. AI tooling
 
-- GitHub Copilot CLI helped inspect the code, implement changes, and draft test cases. Codex helped diagnose token handling and work on bulk assignment and client review flows. I reviewed the generated changes against the project requirements.
+- GitHub Copilot helped me to implement changes, and draft some test cases. It also helped diagnose token handling and work on bulk assignment and client review flows. I reviewed the generated changes against the project requirements.
 
 ## Deployment stretch: HTTPS deployment
 
