@@ -6,26 +6,31 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
+import { useToast } from "@/components/toast/toast-provider";
 
 export function LoginForm() {
   const router = useRouter();
   const { login } = useAuth();
+  const { showToast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
     setIsSubmitting(true);
 
     try {
       await login({ email, password });
       router.replace("/portal");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to sign in. Please try again.");
+      showToast({
+        kind: "error",
+        title: "Sign-in failed",
+        description: cause instanceof Error ? cause.message : "Unable to sign in. Please try again.",
+        duration: 6500,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -84,15 +89,6 @@ export function LoginForm() {
             <p className="mt-6 text-base text-muted-text sm:text-lg">
               Sign in to your dataset workspace
             </p>
-
-            {error ? (
-              <div
-                role="alert"
-                className="mt-7 rounded-2xl border border-status-bad/25 bg-status-bad/5 px-5 py-3 text-sm text-status-bad"
-              >
-                {error}
-              </div>
-            ) : null}
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-6 sm:mt-10">
               <label className="block">

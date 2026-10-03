@@ -11,6 +11,7 @@ import {
 } from "react";
 import { getCurrentUser, loginUser } from "@/lib/api";
 import type { LoginPayload, User } from "@/lib/types";
+import { useToast } from "@/components/toast/toast-provider";
 
 const TOKEN_STORAGE_KEY = "dataset-request-desk-token";
 
@@ -25,6 +26,7 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { showToast } = useToast();
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -62,13 +64,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(TOKEN_STORAGE_KEY, result.access_token);
     setToken(result.access_token);
     setUser(currentUser);
-  }, []);
+    showToast({
+      kind: "success",
+      title: "Signed in successfully",
+      description: `Welcome back${currentUser.full_name ? `, ${currentUser.full_name}` : ""}.`,
+    });
+  }, [showToast]);
 
   const logout = useCallback(() => {
     window.localStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null);
     setUser(null);
-  }, []);
+    showToast({
+      kind: "success",
+      title: "Signed out",
+      description: "You have safely ended your session.",
+    });
+  }, [showToast]);
 
   const value = useMemo(
     () => ({ user, token, isLoading, login, logout }),
