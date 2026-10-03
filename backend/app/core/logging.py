@@ -1,10 +1,10 @@
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request
 from starlette.responses import Response
-from starlette.types import RequestResponseEndpoint
 
 request_logger = logging.getLogger("dataset_request_desk.requests")
 
@@ -14,7 +14,7 @@ def configure_logging() -> None:
 
 
 async def log_requests(
-    request: Request, call_next: RequestResponseEndpoint
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     started_at = time.perf_counter()
     status_code = 500
