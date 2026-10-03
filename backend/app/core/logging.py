@@ -29,5 +29,6 @@ async def log_requests(
             "status": status_code,
             "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
             "user_id": getattr(request.state, "user_id", None),
+            "authorization_header_present": bool(request.headers.get("authorization")),
         }
         request_logger.info(json.dumps(log_entry, separators=(",", ":")))

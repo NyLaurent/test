@@ -41,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function handleExpiredSession(event: Event) {
+      authOperation.current += 1;
       window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
       window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
       setToken(null);
@@ -68,12 +69,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     function handleStorageChange(event: StorageEvent) {
-      if (event.key === AUTH_TOKEN_STORAGE_KEY && event.newValue) {
-        setToken(event.newValue);
-      } else if (event.key === AUTH_TOKEN_STORAGE_KEY && event.newValue === null) {
+      if (event.key !== AUTH_TOKEN_STORAGE_KEY) return;
+
+      const operation = ++authOperation.current;
+      if (!event.newValue) {
         setToken(null);
         setUser(null);
+        setIsLoading(false);
+        return;
       }
+
+      setToken(event.newValue);
+      setUser(null);
+      setIsLoading(true);
+      void getCurrentUser(event.newValue)
+        .then((currentUser) => {
+          if (
+            operation === authOperation.current
+            && window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) === event.newValue
+          ) {
+            setUser(currentUser);
+          }
+        })
+        .catch((cause: unknown) => {
+          if (!(cause instanceof ApiRequestError && cause.status === 401)) {
+            showToast({
+              kind: "error",
+              title: "Could not verify the updated session",
+              description: "The API is temporarily unavailable. Reconnect and sign in again if needed.",
+            });
+          }
+        })
+        .finally(() => {
+          if (operation === authOperation.current) setIsLoading(false);
+        });
     }
 
     window.addEventListener(AUTH_TOKEN_REFRESHED_EVENT, handleTokenRefreshed);
@@ -82,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener(AUTH_TOKEN_REFRESHED_EVENT, handleTokenRefreshed);
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     const savedToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);

@@ -23,10 +23,20 @@ export class ApiRequestError extends Error {
   }
 }
 
-let refreshRequest: Promise<string | null> | null = null;
+const refreshRequests = new Map<string, Promise<string | null>>();
+
+function expireSessionIfCurrent(accessToken: string) {
+  if (window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) !== accessToken) return;
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, {
+    detail: "Your session could not be verified. Please sign in again.",
+  }));
+}
 
 async function refreshAccessToken(rejectedAccessToken: string): Promise<string | null> {
-  if (refreshRequest) return refreshRequest;
+  const inFlightRefresh = refreshRequests.get(rejectedAccessToken);
+  if (inFlightRefresh) return inFlightRefresh;
 
   const refresh = async (): Promise<string | null> => {
     const latestAccessToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
@@ -95,39 +105,48 @@ async function refreshAccessToken(rejectedAccessToken: string): Promise<string |
       refresh,
     ).then((result) => result)
     : refresh();
-  refreshRequest = crossTabRefresh;
+  refreshRequests.set(rejectedAccessToken, crossTabRefresh);
 
   try {
-    return await refreshRequest;
+    return await crossTabRefresh;
   } finally {
-    refreshRequest = null;
+    if (refreshRequests.get(rejectedAccessToken) === crossTabRefresh) {
+      refreshRequests.delete(rejectedAccessToken);
+    }
   }
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit, token?: string): Promise<T> {
-  const headers = new Headers(init?.headers ?? {});
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  let activeToken = token;
-  if (activeToken && typeof window !== "undefined") {
-    activeToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? activeToken;
+  const isPublicAuthRoute = path === "/api/auth/login" || path === "/api/auth/logout";
+  const getStoredToken = () => typeof window !== "undefined"
+    ? window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)?.trim() || null
+    : null;
+  const initialToken = isPublicAuthRoute ? null : getStoredToken() || token?.trim() || null;
+  if (!isPublicAuthRoute && !initialToken) {
+    throw new ApiRequestError("Your session is missing. Please sign in again.", 401);
   }
 
   const send = (accessToken?: string) => {
-    const requestHeaders = new Headers(headers);
-    if (accessToken) requestHeaders.set("Authorization", `******`);
+    const requestHeaders = new Headers(init?.headers ?? {});
+    if (!requestHeaders.has("Content-Type")) {
+      requestHeaders.set("Content-Type", "application/json");
+    }
+    accessToken = isPublicAuthRoute ? undefined : getStoredToken() || accessToken?.trim() || undefined;
+    if (!isPublicAuthRoute && !accessToken) {
+      throw new ApiRequestError("Your session is missing. Please sign in again.", 401);
+    }
+    if (accessToken) requestHeaders.set("Authorization", `Bearer ${accessToken}`);
     return fetch(`${API_BASE}${path}`, { ...init, headers: requestHeaders });
   };
 
-  let response = await send(activeToken);
-  if (response.status === 401 && activeToken && typeof window !== "undefined") {
+  let response = await send(initialToken ?? undefined);
+  if (response.status === 401 && initialToken && typeof window !== "undefined") {
     const latestToken = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
-    const replacementToken = latestToken && latestToken !== activeToken
+    const replacementToken = latestToken && latestToken !== initialToken
       ? latestToken
-      : await refreshAccessToken(activeToken);
+      : await refreshAccessToken(initialToken);
     if (replacementToken) response = await send(replacementToken);
+    if (response.status === 401 && replacementToken) expireSessionIfCurrent(replacementToken);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -164,10 +183,31 @@ export async function getCurrentUser(token: string): Promise<User> {
   if (!token.trim()) {
     throw new ApiRequestError("An access token is required to load the current user", 401);
   }
-  return apiFetch<User>("/api/auth/me", {
+
+  const requestWithToken = (accessToken: string) => fetch(`${API_BASE}/api/auth/me`, {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
-  }, token);
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: "no-store",
+  });
+
+  let response = await requestWithToken(token);
+  if (response.status === 401 && typeof window !== "undefined") {
+    const refreshedToken = await refreshAccessToken(token);
+    if (refreshedToken) response = await requestWithToken(refreshedToken);
+    if (response.status === 401 && refreshedToken) expireSessionIfCurrent(refreshedToken);
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const payload = contentType.includes("application/json") ? await response.json() : null;
+  if (!response.ok) {
+    const detail = (payload as ApiError | null)?.detail;
+    throw new ApiRequestError(typeof detail === "string" ? detail : "Could not load the current user", response.status);
+  }
+
+  return payload as User;
 }
 
 export async function getAdminUsers(token: string): Promise<User[]> {
